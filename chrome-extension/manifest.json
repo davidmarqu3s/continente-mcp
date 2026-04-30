@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Continente Cookie Sync",
+  "version": "1.0",
+  "description": "Syncs continente.pt cookies to Obsidian vault for Hermes MCP",
+  "permissions": ["cookies", "storage"],
+  "host_permissions": ["https://www.continente.pt/*", "https://continente.pt/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "continente-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for Continente supermarket",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "cheerio": "^1.2.0",
+    "playwright": "^1.59.1"
+  }
+}

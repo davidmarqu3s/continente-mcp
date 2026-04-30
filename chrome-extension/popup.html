@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; width: 280px; padding: 16px; background: #1a1a2e; color: #eee; }
+    h1 { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: #e94560; }
+    .status { font-size: 12px; color: #888; margin-bottom: 12px; }
+    .status.ready { color: #4ade80; }
+    .status.empty { color: #f97316; }
+    .btn { display: block; width: 100%; padding: 8px 12px; background: #e94560; color: white; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; margin-bottom: 8px; }
+    .btn:hover { background: #d63850; }
+    .btn.secondary { background: #2a2a4a; color: #aaa; }
+    .info { font-size: 11px; color: #666; margin-top: 10px; line-height: 1.4; }
+    .count { font-size: 24px; font-weight: 700; color: #e94560; }
+    .count-label { font-size: 11px; color: #666; }
+  </style>
+</head>
+<body>
+  <h1>🍎 Continente Cookie Sync</h1>
+  <div id="status" class="status">Loading...</div>
+  <div id="count-block" style="text-align:center; margin: 12px 0; display:none;">
+    <div class="count" id="cookie-count">—</div>
+    <div class="count-label">cookies cached</div>
+  </div>
+  <button class="btn" id="refreshBtn">🔄 Refresh Cookies</button>
+  <button class="btn secondary" id="copyBtn">📋 Copy as JSON</button>
+  <div class="info">
+    Run <code style="color:#aaa;">python3 ~/projects/continente-mcp/continente-cookie-reader.py</code> in terminal to save to vault.
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
