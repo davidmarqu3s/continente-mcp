@@ -6,8 +6,8 @@
     <string>com.david.continente-cookie-sync</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
-        <string>/Users/david/projects/continente-mcp/continente-cookie-reader.py</string>
+        <string>/opt/homebrew/bin/python3</string>
+        <string>/Users/D/Documents/GitHub/continente-mcp/continente-cookie-reader.py</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
