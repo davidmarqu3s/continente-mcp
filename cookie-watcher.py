@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VAULT_COOKIE = Path.home() / "vault" / "_claude" / "continente" / "cookies.json"
+VAULT_COOKIE = Path.home() / "vault" / "_claude" / "continente-cookies" / "cookies.json"
 LOCAL_COOKIE = Path.home() / ".continente" / "cookies.json"
 LAST_MARKER = Path.home() / ".continente" / ".last_cookie_hash"
 
