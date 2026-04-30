@@ -22,9 +22,9 @@ LOCAL_COOKIE = Path.home() / ".continente" / "cookies.json"
 VAULT_COOKIE = (
     Path.home()
     / "Library/Mobile Documents/iCloud~md~obsidian/Documents/vault"
-    / "_claude/continente-cookies/cookies.json"
+    / "_claude/continente/cookies.json"
 ) if IS_MAC else (
-    Path.home() / "vault" / "_claude" / "continente-cookies" / "cookies.json"
+    Path.home() / "vault" / "_claude" / "continente" / "cookies.json"
 )
 PING_URL = "https://www.continente.pt/on/demandware.store/Sites-continente-Site/default/Account-Show"
 CHECK_URL = "https://www.continente.pt/conta/encomendas/"

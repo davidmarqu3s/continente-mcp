@@ -12,7 +12,7 @@ from pathlib import Path
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────
 # iCloud vault path (MacBook)
-VAULT_PATH = Path.home() / "Library" / "Mobile Documents" / "iCloud~md~obsidian" / "Documents" / "vault" / "_claude" / "continente-cookies" / "cookies.json"
+VAULT_PATH = Path.home() / "Library" / "Mobile Documents" / "iCloud~md~obsidian" / "Documents" / "vault" / "_claude" / "continente" / "cookies.json"
 DOMAIN = "continente.pt"
 # ───────────────────────────────────────────────────────────────────────────
 

@@ -17,12 +17,21 @@ let page = null;
 function normalizeCookies(cookies) {
   return cookies
     .filter(c => c.name && c.name !== 'undefined')
-    .map(c => ({
-      ...c,
-      sameSite: (!c.sameSite || c.sameSite === 'unspecified') ? 'Lax'
-        : c.sameSite === 'no_restriction' ? 'None'
-        : c.sameSite.charAt(0).toUpperCase() + c.sameSite.slice(1).toLowerCase()
-    }));
+    .map(c => {
+      const normalized = {
+        name: c.name,
+        value: c.value,
+        domain: c.domain,
+        path: c.path || '/',
+        httpOnly: Boolean(c.httpOnly),
+        secure: Boolean(c.secure),
+        sameSite: (!c.sameSite || c.sameSite === 'unspecified') ? 'Lax'
+          : c.sameSite === 'no_restriction' ? 'None'
+          : c.sameSite.charAt(0).toUpperCase() + c.sameSite.slice(1).toLowerCase()
+      };
+      if (c.expires != null) normalized.expires = Number(c.expires);
+      return normalized;
+    });
 }
 
 async function ensureBrowser() {
@@ -228,34 +237,90 @@ async function addToCart(productId, quantity = 1) {
 
 async function getOrderHistory() {
   await goto(`${CONTINENTE_BASE}/conta/encomendas/`);
-  const html = await page.content();
-  const $ = cheerio.load(html);
+  await page.waitForTimeout(3000);
+
+  if (page.url().includes('/login')) return { error: 'not_authenticated' };
+
+  const text = await page.evaluate(() => document.body.innerText);
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
   const orders = [];
+  const orderNumRe = /^\d{9}_\d{3}$/;
+  const dateRe = /^\d{1,2} [A-Za-zÀ-ÿ]+ \d{2,4}/;
 
-  // Try to find order entries - look for date + product patterns
-  const text = $.text();
-  const orderSections = text.split(/(?:Encomenda|Order|Pedido)/i);
-
-  for (const section of orderSections.slice(1, 6)) {
-    const dateMatch = section.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/);
-    const date = dateMatch ? dateMatch[0] : 'Unknown date';
-    const products = [];
-
-    // Find product names in section
-    const productMatches = section.match(/[A-Z][a-zÀ-ÿ\d\s]+?(?:\s+\d+[,.]\d+€)/g);
-    if (productMatches) {
-      for (const m of productMatches.slice(0, 5)) {
-        const cleaned = m.trim().substring(0, 80);
-        if (cleaned.length > 3) products.push(cleaned);
-      }
-    }
-
-    if (products.length > 0) {
-      orders.push({ date, products });
+  for (let i = 0; i < lines.length; i++) {
+    if (orderNumRe.test(lines[i])) {
+      const date = lines[i + 1] && dateRe.test(lines[i + 1]) ? lines[i + 1] : null;
+      orders.push({ orderNumber: lines[i], date });
     }
   }
 
   return orders;
+}
+
+async function getOrderProducts(orderDetailUrl) {
+  await page.goto(orderDetailUrl, { waitUntil: 'networkidle', timeout: 20000 });
+  await page.waitForTimeout(2000);
+
+  return page.evaluate(() => {
+    const products = [];
+    document.querySelectorAll('[class*="product-line"]').forEach(el => {
+      const qtyEl = el.querySelector('[class*="qty"], [class*="quantity"], [class*="amount"]');
+      if (!qtyEl) return; // skip category headers
+
+      const nameEl = el.querySelector('[class*="product-name"], [class*="name"], a[href*="produto"]');
+      const rawName = (nameEl || el).textContent.trim();
+      // Take only first line — rest is brand/subcopy
+      const name = rawName.split('\n')[0].trim();
+
+      const qtyMatch = qtyEl.textContent.trim().match(/^(\d+)/);
+      const qty = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
+
+      if (name && name.length > 3) products.push({ name, qty });
+    });
+    return products;
+  });
+}
+
+async function getMostBought() {
+  await goto(`${CONTINENTE_BASE}/conta/encomendas/`);
+  await page.waitForTimeout(3000);
+
+  if (page.url().includes('/login')) return { error: 'not_authenticated' };
+
+  // Collect all unique order detail links
+  const orderLinks = await page.evaluate(() => {
+    const seen = new Set();
+    return Array.from(document.querySelectorAll('a[href*="detalhe-encomenda"]'))
+      .map(a => a.href)
+      .filter(h => { if (seen.has(h)) return false; seen.add(h); return true; });
+  });
+
+  if (orderLinks.length === 0) return { error: 'no_orders' };
+
+  // Tally products across all orders
+  const tally = new Map(); // name -> { qty, orders }
+
+  for (const link of orderLinks) {
+    try {
+      const products = await getOrderProducts(link);
+      for (const { name, qty } of products) {
+        const existing = tally.get(name);
+        if (existing) {
+          existing.qty += qty;
+          existing.orders += 1;
+        } else {
+          tally.set(name, { qty, orders: 1 });
+        }
+      }
+    } catch (e) {
+      // skip failed order pages
+    }
+  }
+
+  return Array.from(tally.entries())
+    .map(([name, { qty, orders }]) => ({ name, qty, orders }))
+    .sort((a, b) => b.qty - a.qty);
 }
 
 // ─── Preferences ───────────────────────────────────────────────────────────────
@@ -367,6 +432,11 @@ class ContinenteServer {
           }
         },
         {
+          name: 'get_most_bought',
+          description: 'Get the products you buy most often, based on your Cartão Continente history.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
           name: 'close_session',
           description: 'Close the browser session. Call when done to free resources.',
           inputSchema: { type: 'object', properties: {} }
@@ -390,6 +460,8 @@ class ContinenteServer {
             return await this.handle_add_to_cart(args.product_id, args.quantity || 1);
           case 'get_order_history':
             return await this.handle_order_history(args.limit || 5);
+          case 'get_most_bought':
+            return await this.handle_most_bought();
           case 'close_session':
             await closeBrowser();
             return { content: [{ type: 'text', text: 'Session closed.' }] };
@@ -481,16 +553,43 @@ class ContinenteServer {
 
   async handle_order_history(limit) {
     const orders = await getOrderHistory();
-    if (orders.length === 0) {
-      return { content: [{ type: 'text', text: 'Could not load order history — orders may be loaded dynamically. Try refreshing or checking manually at https://www.continente.pt/conta/encomendas/' }] };
+    if (!Array.isArray(orders) || orders.length === 0) {
+      return { content: [{ type: 'text', text: 'Could not load order history. Check https://www.continente.pt/conta/encomendas/' }] };
     }
-    const list = orders.slice(0, limit).map((o, i) =>
-      `${i + 1}. 📦 ${o.date}\n   ${o.products.slice(0, 3).join(', ')}${o.products.length > 3 ? '...' : ''}`
-    ).join('\n\n');
+    if (orders.error === 'not_authenticated') {
+      return { content: [{ type: 'text', text: 'Not logged in — cookies may have expired. Re-sync your cookies.' }] };
+    }
+    const list = orders.slice(0, limit).map((o, i) => {
+      if (o.raw) return `${i + 1}. ${o.raw}`;
+      const date = o.date ? `📅 ${o.date}` : '';
+      const total = o.total ? ` — ${o.total}` : '';
+      const lines = o.lines ? o.lines.slice(0, 5).join(' · ') : '';
+      return `${i + 1}. ${date}${total}\n   ${lines}`;
+    }).join('\n\n');
     return {
       content: [{
         type: 'text',
         text: `Recent orders:\n\n${list}\n\nView full history at https://www.continente.pt/conta/encomendas/`
+      }]
+    };
+  }
+
+  async handle_most_bought() {
+    const result = await getMostBought();
+    if (!Array.isArray(result) || result.length === 0) {
+      return { content: [{ type: 'text', text: 'Could not calculate most bought items from order history.' }] };
+    }
+    if (result.error) {
+      return { content: [{ type: 'text', text: result.error === 'not_authenticated' ? 'Not logged in — cookies may have expired.' : `Error: ${result.error}` }] };
+    }
+    const top = result.slice(0, 25);
+    const list = top.map((item, i) =>
+      `${i + 1}. ${item.name} — ${item.qty} units across ${item.orders} order${item.orders > 1 ? 's' : ''}`
+    ).join('\n');
+    return {
+      content: [{
+        type: 'text',
+        text: `Most bought products (calculated from your order history):\n\n${list}`
       }]
     };
   }
