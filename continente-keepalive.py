@@ -9,17 +9,22 @@ If the session has expired, re-reads cookies from Arc and re-pings.
 Run via LaunchAgent every 20 minutes.
 """
 import json
+import platform
 import subprocess
 import sys
 from pathlib import Path
 
 import requests
 
+IS_MAC = platform.system() == "Darwin"
+
 LOCAL_COOKIE = Path.home() / ".continente" / "cookies.json"
 VAULT_COOKIE = (
     Path.home()
     / "Library/Mobile Documents/iCloud~md~obsidian/Documents/vault"
     / "_claude/continente-cookies/cookies.json"
+) if IS_MAC else (
+    Path.home() / "vault" / "_claude" / "continente-cookies" / "cookies.json"
 )
 PING_URL = "https://www.continente.pt/on/demandware.store/Sites-continente-Site/default/Account-Show"
 CHECK_URL = "https://www.continente.pt/conta/encomendas/"
@@ -101,33 +106,36 @@ def main() -> None:
     cookies = load_cookies(LOCAL_COOKIE) or load_cookies(VAULT_COOKIE)
 
     if not cookies:
-        log("No cookies found — trying Arc...")
-        cookies = refresh_from_arc()
+        if IS_MAC:
+            log("No cookies found — trying Arc...")
+            cookies = refresh_from_arc()
         if not cookies:
-            log("ERROR: No cookies anywhere. Log into Continente in Arc.")
+            log("ERROR: No cookies found. Log into Continente in Arc (MacBook).")
             sys.exit(1)
 
     logged_in, _ = ping(cookies)
 
     if logged_in:
         log("Session alive — ping successful.")
-        # Keep vault and local in sync with whatever cookies are in use
         save_cookies(cookies)
         return
 
-    log("Session expired — refreshing from Arc...")
-    cookies = refresh_from_arc()
-    if not cookies:
-        log("ERROR: Could not refresh cookies from Arc.")
-        sys.exit(1)
-
-    logged_in, _ = ping(cookies)
-    if logged_in:
-        save_cookies(cookies)
-        log("Session restored from Arc.")
-    else:
+    if IS_MAC:
+        log("Session expired — refreshing from Arc...")
+        cookies = refresh_from_arc()
+        if not cookies:
+            log("ERROR: Could not refresh cookies from Arc.")
+            sys.exit(1)
+        logged_in, _ = ping(cookies)
+        if logged_in:
+            save_cookies(cookies)
+            log("Session restored from Arc.")
+            return
         log("ERROR: Still not logged in after refresh. Log into Continente in Arc manually.")
-        sys.exit(1)
+    else:
+        log("ERROR: Session expired. Log into Continente on MacBook — cookies will sync within 20 min.")
+
+    sys.exit(1)
 
 
 if __name__ == "__main__":
