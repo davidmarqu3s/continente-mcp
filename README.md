@@ -56,6 +56,8 @@ npm run setup
 # or: npx playwright install chromium --with-deps
 ```
 
+> **Linux note:** `--with-deps` installs OS-level dependencies via apt. On macOS and Windows this flag is a no-op — `npx playwright install chromium` is sufficient.
+
 ### 2. Export your cookies
 
 The server authenticates using cookies from your existing browser session — no password handling, no OAuth flow. You need to be **logged into Continente.pt** in your browser first.
@@ -63,16 +65,19 @@ The server authenticates using cookies from your existing browser session — no
 Install the cookie reader dependencies:
 
 ```bash
-pip install browser-cookie3 requests
+python3 -m pip install browser-cookie3 requests   # macOS / Linux
+python  -m pip install browser-cookie3 requests   # Windows
 ```
 
 Export your cookies:
 
 ```bash
-python3 continente-cookie-reader.py
+python3 continente-cookie-reader.py   # macOS / Linux
+python  continente-cookie-reader.py   # Windows
 # Auto-detecting browser with Continente cookies...
 # Found 20 cookies in chrome.
-# Saved 20 cookies → /Users/you/.continente/cookies.json  (browser: chrome)
+# Saved 20 cookies → ~/.continente/cookies.json  (browser: chrome)
+# On Windows: %USERPROFILE%\.continente\cookies.json
 ```
 
 To specify a browser explicitly:
@@ -82,7 +87,7 @@ python3 continente-cookie-reader.py --browser firefox
 python3 continente-cookie-reader.py --list-browsers   # see all supported browsers
 ```
 
-Cookies are saved to `~/.continente/cookies.json` with owner-only read permissions.
+Cookies are saved to `~/.continente/cookies.json` (`%USERPROFILE%\.continente\cookies.json` on Windows) with owner-only read permissions.
 
 ### 3. Configure your MCP client
 
@@ -120,8 +125,10 @@ Where to put this config:
 |--------|-------------|
 | Claude Desktop (Mac) | `~/Library/Application Support/Claude/claude_desktop_config.json` |
 | Claude Desktop (Windows) | `%APPDATA%\Claude\claude_desktop_config.json` |
-| Cursor | `.cursor/mcp.json` in your project, or `~/.cursor/mcp.json` globally |
-| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
+| Cursor (Mac/Linux) | `.cursor/mcp.json` in your project, or `~/.cursor/mcp.json` globally |
+| Cursor (Windows) | `.cursor\mcp.json` in your project, or `%USERPROFILE%\.cursor\mcp.json` globally |
+| Windsurf (Mac/Linux) | `~/.codeium/windsurf/mcp_config.json` |
+| Windsurf (Windows) | `%USERPROFILE%\.codeium\windsurf\mcp_config.json` |
 | Other clients | See your client's MCP documentation |
 
 ---
@@ -168,6 +175,14 @@ crontab -e
 */20 * * * * python3 /path/to/continente-keepalive.py >> ~/.continente/keepalive.log 2>&1
 ```
 
+**Windows (Task Scheduler):**
+
+```powershell
+schtasks /create /tn "ContinenteKeepalive" /tr "python C:\path\to\continente-keepalive.py" /sc minute /mo 20 /f
+```
+
+Or open Task Scheduler and create a task that runs `python C:\path\to\continente-keepalive.py` every 20 minutes.
+
 If the session expires, the keepalive script will automatically re-read cookies from your browser.
 
 ---
@@ -175,7 +190,8 @@ If the session expires, the keepalive script will automatically re-read cookies 
 ## Security
 
 - **Cookies give full account access** — they can view your address, manage your cart, and see your order history. Treat them like a password.
-- Cookies are stored at `~/.continente/cookies.json` with **owner-only read permissions** (chmod 600).
+- **macOS / Linux:** Cookies are stored at `~/.continente/cookies.json` with owner-only read permissions (`chmod 600`).
+- **Windows:** Cookies are stored at `%USERPROFILE%\.continente\cookies.json`. To restrict access: `icacls "%USERPROFILE%\.continente\cookies.json" /inheritance:r /grant:r "%USERNAME%:R"`
 - This path is excluded from git via `.gitignore`. Never commit it.
 - Cookies expire roughly every 30 days. Re-run `continente-cookie-reader.py` to refresh them.
 
@@ -188,15 +204,48 @@ Run `check-change.js` on a schedule to get notified if Continente updates their 
 ```bash
 # First run saves a structural fingerprint
 node check-change.js
+```
 
-# Daily cron — warns if selectors change
+**Linux / WSL (cron):**
+```bash
+# Daily at 9am
 0 9 * * * node /path/to/check-change.js >> ~/.continente/change-detector.log 2>&1
 ```
 
-To receive a webhook notification (Slack, Discord, n8n, etc.) on change:
+**macOS (launchd):** Add a plist similar to the keepalive one above, with `StartInterval` set to `86400`.
+
+**Windows (Task Scheduler):**
+```powershell
+schtasks /create /tn "ContinenteChangeDetector" /tr "node C:\path\to\check-change.js" /sc daily /st 09:00 /f
+```
+
+To receive a webhook notification (Slack, Discord, n8n, etc.) on change, set `CONTINENTE_ALERT_WEBHOOK` in your environment or MCP client config:
 
 ```bash
+# macOS / Linux
 export CONTINENTE_ALERT_WEBHOOK=https://hooks.slack.com/services/...
+
+# Windows cmd
+set CONTINENTE_ALERT_WEBHOOK=https://hooks.slack.com/services/...
+
+# Windows PowerShell
+$env:CONTINENTE_ALERT_WEBHOOK = "https://hooks.slack.com/services/..."
+```
+
+Or add it to your MCP client config under `env` (platform-neutral):
+
+```json
+{
+  "mcpServers": {
+    "continente": {
+      "command": "npx",
+      "args": ["continente-mcp"],
+      "env": {
+        "CONTINENTE_ALERT_WEBHOOK": "https://hooks.slack.com/services/..."
+      }
+    }
+  }
+}
 ```
 
 ---
@@ -208,6 +257,7 @@ export CONTINENTE_ALERT_WEBHOOK=https://hooks.slack.com/services/...
 ```bash
 node continente-backup.js
 # → ~/.continente/orders-backup.json
+# → %USERPROFILE%\.continente\orders-backup.json  (Windows)
 ```
 
 ---
@@ -242,6 +292,8 @@ See [`.env.example`](./.env.example) for all options. The main ones:
 | `CONTINENTE_STATE_DIR` | `~/.continente` | Directory for preferences, fingerprint, backups |
 | `CONTINENTE_ALERT_WEBHOOK` | — | Webhook URL for change detection alerts |
 | `CONTINENTE_VAULT_COOKIE_PATH` | — | Optional secondary path to also write cookies to (for multi-machine sync) |
+
+> **Windows:** Replace `~` with `%USERPROFILE%` (cmd) or `$env:USERPROFILE` (PowerShell). Node.js accepts both `/` and `\` as path separators.
 
 ---
 
