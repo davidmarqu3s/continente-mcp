@@ -104,33 +104,6 @@ async function fetchFavorites() {
   });
 }
 
-async function getFavoritesWithPrices() {
-  await goto(`${CONTINENTE_BASE}/conta/lista-produtos/?list=favorites`);
-  const html = await page.content();
-  const $ = cheerio.load(html);
-  const products = [];
-
-  $('a[href*="/produto/"]').each((i, el) => {
-    const $el = $(el);
-    const text = $el.text().replace(/\s+/g, ' ').trim();
-    const href = $el.attr('href') || '';
-    const idMatch = href.match(/\/produto\/([^\/\?]+)/);
-    const productId = idMatch ? idMatch[1] : null;
-    const priceMatch = text.match(/(\d+[,.]\d+€)/);
-    const name = text.replace(/\d+[,.]\d+€/g, '').trim().substring(0, 120);
-    if (name && name.length > 3 && productId) {
-      products.push({ name, productId, price: priceMatch ? priceMatch[1] : null, url: href });
-    }
-  });
-
-  const seen = new Set();
-  return products.filter(p => {
-    if (seen.has(p.productId)) return false;
-    seen.add(p.productId);
-    return true;
-  });
-}
-
 // ─── Product Search ────────────────────────────────────────────────────────────
 
 async function searchProducts(query, limit = 10) {
@@ -242,7 +215,8 @@ async function addToCart(productId, quantity = 1) {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
         body: body.toString(),
-        credentials: 'include'
+        credentials: 'include',
+        signal: AbortSignal.timeout(10000)
       });
       const json = await res.json();
       return { success: res.ok, status: res.status, cartCount: json?.quantityTotal, error: json?.message };
@@ -581,7 +555,7 @@ class ContinenteServer {
     return {
       content: [{
         type: 'text',
-        text: `🛒 Cart (${items.length} items):\n\n${list}\n\n💶 Total: ${total.toFixed(2)}€\n\nGo to https://www.continente.pt/carrinho/ to checkout.`
+        text: `🛒 Cart (${items.length} items):\n\n${list}\n\n💶 Total: ${total.toFixed(2)}€\n\nGo to https://www.continente.pt/checkout/carrinho/ to checkout.`
       }]
     };
   }
@@ -595,12 +569,12 @@ class ContinenteServer {
   }
 
   async handle_order_history(limit) {
-    const orders = await getOrderHistory();
+    const orders = await getOrderHistory(limit);
+    if (orders?.error === 'not_authenticated') {
+      return { content: [{ type: 'text', text: 'Not logged in — cookies may have expired. Re-sync your cookies.' }] };
+    }
     if (!Array.isArray(orders) || orders.length === 0) {
       return { content: [{ type: 'text', text: 'Could not load order history. Check https://www.continente.pt/conta/encomendas/' }] };
-    }
-    if (orders.error === 'not_authenticated') {
-      return { content: [{ type: 'text', text: 'Not logged in — cookies may have expired. Re-sync your cookies.' }] };
     }
     const list = orders.slice(0, limit).map((o, i) => {
       if (o.raw) return `${i + 1}. ${o.raw}`;

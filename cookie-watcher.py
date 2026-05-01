@@ -37,11 +37,12 @@ def load_vault_cookies() -> list | None:
 
 def save_to_local(cookies: list) -> None:
     LOCAL_COOKIE.parent.mkdir(parents=True, exist_ok=True)
-    LOCAL_COOKIE.write_text(json.dumps(cookies, indent=2, ensure_ascii=False))
-    # Normalize sameSite values for compatibility
+    # Playwright requires title-case SameSite values
     for c in cookies:
         if c.get("sameSite") == "no_restriction":
-            c["sameSite"] = "none"
+            c["sameSite"] = "None"
+        elif not c.get("sameSite") or c.get("sameSite") == "unspecified":
+            c["sameSite"] = "Lax"
     LOCAL_COOKIE.write_text(json.dumps(cookies, indent=2, ensure_ascii=False))
     print(f"[cookie-watcher] Updated {LOCAL_COOKIE} ({len(cookies)} cookies)")
 

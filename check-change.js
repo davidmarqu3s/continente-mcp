@@ -42,7 +42,7 @@ async function fetchHtml() {
   });
 
   // Load existing session cookies if available
-  const cookieFile = `${STATE_DIR}/session.json`;
+  const cookieFile = `${STATE_DIR}/cookies.json`;
   if (existsSync(cookieFile)) {
     try {
       const cookies = JSON.parse(readFileSync(cookieFile, 'utf8'));
