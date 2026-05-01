@@ -4,6 +4,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { chromium } from 'playwright';
 import * as cheerio from 'cheerio';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { normalizeCookies } from './utils.js';
 
 const CONTINENTE_BASE = 'https://www.continente.pt';
 const STATE_DIR = `${process.env.HOME}/.continente`;
@@ -13,26 +14,6 @@ const STATE_DIR = `${process.env.HOME}/.continente`;
 let browser = null;
 let context = null;
 let page = null;
-
-function normalizeCookies(cookies) {
-  return cookies
-    .filter(c => c.name && c.name !== 'undefined')
-    .map(c => {
-      const normalized = {
-        name: c.name,
-        value: c.value,
-        domain: c.domain,
-        path: c.path || '/',
-        httpOnly: Boolean(c.httpOnly),
-        secure: Boolean(c.secure),
-        sameSite: (!c.sameSite || c.sameSite === 'unspecified') ? 'Lax'
-          : c.sameSite === 'no_restriction' ? 'None'
-          : c.sameSite.charAt(0).toUpperCase() + c.sameSite.slice(1).toLowerCase()
-      };
-      if (c.expires != null) normalized.expires = Number(c.expires);
-      return normalized;
-    });
-}
 
 async function ensureBrowser() {
   if (browser) return browser;
@@ -447,7 +428,7 @@ class ContinenteServer {
         },
         {
           name: 'get_most_bought',
-          description: 'Get the products you buy most often, based on your Cartão Continente history.',
+          description: 'Get the products you buy most often, tallied across all orders. Scans every order page sequentially — slow on accounts with many orders.',
           inputSchema: { type: 'object', properties: {} }
         },
         {
