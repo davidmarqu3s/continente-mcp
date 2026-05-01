@@ -11,8 +11,8 @@ import sys
 from pathlib import Path
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────
-# iCloud vault path (MacBook)
 VAULT_PATH = Path.home() / "Library" / "Mobile Documents" / "iCloud~md~obsidian" / "Documents" / "vault" / "_claude" / "continente" / "cookies.json"
+MCP_PATH = Path.home() / ".continente" / "cookies.json"
 DOMAIN = "continente.pt"
 # ───────────────────────────────────────────────────────────────────────────
 
@@ -58,7 +58,15 @@ def read_chrome_cookies() -> list[dict]:
         return []
 
 def save_cookies(cookies: list[dict]) -> bool:
-    """Save cookies to vault if changed."""
+    """Save cookies to vault and MCP path."""
+    cookie_json = json.dumps(cookies, indent=2, ensure_ascii=False)
+
+    # Always write to MCP path
+    MCP_PATH.parent.mkdir(parents=True, exist_ok=True)
+    MCP_PATH.write_text(cookie_json)
+    print(f"Saved {len(cookies)} cookies → {MCP_PATH}")
+
+    # Write to vault only if changed
     VAULT_PATH.parent.mkdir(parents=True, exist_ok=True)
     existing = []
     if VAULT_PATH.exists():
@@ -66,22 +74,20 @@ def save_cookies(cookies: list[dict]) -> bool:
             existing = json.loads(VAULT_PATH.read_text())
         except Exception:
             pass
-    if cookies == existing:
-        print("Cookies unchanged — no sync needed.")
-        return False
-    VAULT_PATH.write_text(json.dumps(cookies, indent=2, ensure_ascii=False))
-    print(f"Saved {len(cookies)} cookies → {VAULT_PATH}")
-    return True
+    if cookies != existing:
+        VAULT_PATH.write_text(cookie_json)
+        print(f"Saved {len(cookies)} cookies → {VAULT_PATH}")
+        return True
+
+    print("Vault unchanged.")
+    return False
 
 if __name__ == "__main__":
-    print(f"Reading cookies from Chrome for {DOMAIN}...")
+    print(f"Reading cookies from Arc for {DOMAIN}...")
     cookies = read_chrome_cookies()
     print(f"Found {len(cookies)} cookies")
     if cookies:
-        saved = save_cookies(cookies)
-        if saved:
-            print("Done — vault updated, will sync to Optiplex.")
-        else:
-            print("No changes detected.")
+        save_cookies(cookies)
+        print("Done.")
     else:
-        print("WARNING: No cookies found — is Chrome logged into Continente?")
+        print("WARNING: No cookies found — is Arc logged into Continente?")

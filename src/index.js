@@ -187,28 +187,35 @@ function parseProducts(html, limit = 30) {
 // ─── Cart ─────────────────────────────────────────────────────────────────────
 
 async function getCart() {
-  await goto(`${CONTINENTE_BASE}/carrinho/`);
-  const html = await page.content();
-  const $ = cheerio.load(html);
-  const items = [];
+  await goto(`${CONTINENTE_BASE}/checkout/carrinho/`);
 
-  $('[class*="cart-item"], [class*="basket-item"], .item, [class*="product-row"]').each((i, el) => {
-    const text = $(el).text().replace(/\s+/g, ' ').trim();
-    if (text.includes('€')) {
-      const priceMatch = text.match(/(\d+[,.]\d+)€/);
-      const qtyMatch = text.match(/(\d+)\s*(?:x|un)/);
-      const name = text.split('€')[0].trim().substring(0, 80);
-      if (name) {
-        items.push({
-          name,
-          price: priceMatch ? parseFloat(priceMatch[1].replace(',', '.')) : null,
-          qty: qtyMatch ? parseInt(qtyMatch[1]) : 1
-        });
-      }
-    }
+  if (page.url().includes('/login')) return { error: 'not_authenticated' };
+
+  return page.evaluate(() => {
+    const cartList = document.querySelector('.js-cart-product-list');
+    if (!cartList) return [];
+
+    const seen = new Set();
+    const items = [];
+
+    cartList.querySelectorAll('[data-pid][data-product-name]').forEach(el => {
+      const pid = el.dataset.pid;
+      const name = el.dataset.productName;
+      if (!name || seen.has(pid)) return;
+      seen.add(pid);
+
+      const priceEl = el.querySelector('.pwc-tile--price-primary');
+      const priceText = priceEl?.textContent?.trim().replace(/[^\d,]/g, '').replace(',', '.');
+      const price = priceText ? parseFloat(priceText) : null;
+
+      const qtyInput = el.querySelector('input.add-to-cart-quantity');
+      const qty = qtyInput ? parseInt(qtyInput.value) || 1 : 1;
+
+      items.push({ name, price, qty });
+    });
+
+    return items;
   });
-
-  return items;
 }
 
 async function addToCart(productId, quantity = 1) {
@@ -561,7 +568,10 @@ class ContinenteServer {
 
   async handle_get_cart() {
     const items = await getCart();
-    if (items.length === 0) {
+    if (items?.error === 'not_authenticated') {
+      return { content: [{ type: 'text', text: 'Not logged in — cookies may have expired. Re-run the cookie sync script.' }] };
+    }
+    if (!Array.isArray(items) || items.length === 0) {
       return { content: [{ type: 'text', text: '🛒 Cart is empty.' }] };
     }
     const total = items.reduce((s, i) => s + (i.price || 0) * i.qty, 0);
