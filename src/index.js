@@ -143,24 +143,27 @@ function parseProducts(html, limit = 30) {
   const $ = cheerio.load(html);
   const products = [];
 
-  $('a[href*="/produto/"]').each((i, el) => {
+  // Prices live in the card container (.ct-inner-tile-wrap), not in the <a> tag itself
+  $('.ct-inner-tile-wrap').each((i, el) => {
     if (products.length >= limit) return;
     const $el = $(el);
-    const text = $el.text().replace(/\s+/g, ' ').trim();
-    const href = $el.attr('href') || '';
+    const link = $el.find('a[href*="/produto/"]').first();
+    const href = link.attr('href') || '';
+    if (!href) return;
 
-    if (!text || text.length < 5 || text.length > 2000) return;
-    if (!text.includes('€')) return;
+    const idMatch = href.match(/\/produto\/([^\/\?]+?)(?:\.html)?(?:\?|$)/);
+    const productId = idMatch ? idMatch[1] : null;
+    if (!productId) return;
 
-    const idMatch = href.match(/\/produto\/([^\/\?]+)/);
-    const productId = idMatch ? idMatch[1] : href;
-    const priceMatch = text.match(/(\d+[,.]\d+)€/);
+    const cardText = $el.text().replace(/\s+/g, ' ').trim();
+    const priceMatch = cardText.match(/(\d+[,.]\d+)€/);
     if (!priceMatch) return;
 
     const price = parseFloat(priceMatch[1].replace(',', '.'));
-    const name = text.replace(/(\d+[,.]\d+)€/g, '').replace(/\s+/g, ' ').trim().substring(0, 100);
-    const unitMatch = text.match(/(\d+[,.]\d+€)\/([a-zA-Z]+)/);
+    const unitMatch = cardText.match(/(\d+[,.]\d+€)\/([a-zA-Z]+)/);
 
+    const nameLink = $el.find('a[href*="/produto/"]').filter((_, a) => $(a).text().trim().length > 0).first();
+    let name = nameLink.text().replace(/\s+/g, ' ').trim().substring(0, 100);
     if (name.length < 3) return;
 
     products.push({
@@ -209,49 +212,79 @@ async function getCart() {
 }
 
 async function addToCart(productId, quantity = 1) {
-  await goto(`${CONTINENTE_BASE}/produto/${productId}`);
-  
-  // Find add to cart button and click
-  const buttons = await page.locator('button').all();
-  for (const btn of buttons) {
-    const text = await btn.textContent();
-    if (text && (text.includes('Adicionar') || text.includes('Carrinho'))) {
-      await btn.click();
-      await page.waitForTimeout(1500);
-      return { success: true };
+  const slug = productId.endsWith('.html') ? productId : `${productId}.html`;
+  await goto(`${CONTINENTE_BASE}/produto/${slug}`);
+
+  // Extract numeric PID and Cart-AddProduct URL from page
+  const result = await page.evaluate(async (qty) => {
+    const pidInput = document.querySelector('input[name="productID"]');
+    const urlInput = document.querySelector('input.add-to-cart-url');
+    const csrfInput = document.querySelector('input[name="csrf_token"]');
+
+    if (!pidInput || !urlInput) return { success: false, message: 'Could not find product form data' };
+
+    const pid = pidInput.value;
+    const cartUrl = urlInput.value;
+    const csrf = csrfInput ? csrfInput.value : '';
+
+    const body = new URLSearchParams({ pid, quantity: String(qty), options: '[]' });
+    if (csrf) body.append('csrf_token', csrf);
+
+    try {
+      const res = await fetch(cartUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+        body: body.toString(),
+        credentials: 'include'
+      });
+      const json = await res.json();
+      return { success: res.ok, status: res.status, cartCount: json?.quantityTotal, error: json?.message };
+    } catch (e) {
+      return { success: false, message: e.message };
     }
-  }
+  }, quantity);
 
-  // Try clicking the first add button
-  const addBtn = page.locator('[class*="add-to-cart"], button[class*="add"]').first();
-  if (await addBtn.count() > 0) {
-    await addBtn.click();
-    await page.waitForTimeout(1500);
-    return { success: true };
-  }
-
-  return { success: false, message: 'Could not find add to cart button' };
+  return result;
 }
 
 // ─── Order History ────────────────────────────────────────────────────────────
 
-async function getOrderHistory() {
+async function getOrderHistory(limit = 5) {
   await goto(`${CONTINENTE_BASE}/conta/encomendas/`);
   await page.waitForTimeout(3000);
 
   if (page.url().includes('/login')) return { error: 'not_authenticated' };
 
   const text = await page.evaluate(() => document.body.innerText);
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const rawLines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
   const orders = [];
   const orderNumRe = /^\d{9}_\d{3}$/;
   const dateRe = /^\d{1,2} [A-Za-zÀ-ÿ]+ \d{2,4}/;
 
-  for (let i = 0; i < lines.length; i++) {
-    if (orderNumRe.test(lines[i])) {
-      const date = lines[i + 1] && dateRe.test(lines[i + 1]) ? lines[i + 1] : null;
-      orders.push({ orderNumber: lines[i], date });
+  for (let i = 0; i < rawLines.length; i++) {
+    if (orderNumRe.test(rawLines[i])) {
+      const date = rawLines[i + 1] && dateRe.test(rawLines[i + 1]) ? rawLines[i + 1] : null;
+      orders.push({ orderNumber: rawLines[i], date });
+    }
+  }
+
+  // Collect order detail links
+  const orderLinks = await page.evaluate(() => {
+    const seen = new Set();
+    return Array.from(document.querySelectorAll('a[href*="detalhe-encomenda"]'))
+      .map(a => a.href)
+      .filter(h => { if (seen.has(h)) return false; seen.add(h); return true; });
+  });
+
+  // Fetch product lines for each order up to limit
+  const detailLinks = orderLinks.slice(0, limit);
+  for (let idx = 0; idx < detailLinks.length; idx++) {
+    try {
+      const products = await getOrderProducts(detailLinks[idx]);
+      if (orders[idx]) orders[idx].lines = products.map(p => `${p.qty}x ${p.name}`);
+    } catch (e) {
+      // skip failed pages
     }
   }
 
@@ -563,7 +596,7 @@ class ContinenteServer {
       if (o.raw) return `${i + 1}. ${o.raw}`;
       const date = o.date ? `📅 ${o.date}` : '';
       const total = o.total ? ` — ${o.total}` : '';
-      const lines = o.lines ? o.lines.slice(0, 5).join(' · ') : '';
+      const lines = o.lines ? o.lines.join(' · ') : '';
       return `${i + 1}. ${date}${total}\n   ${lines}`;
     }).join('\n\n');
     return {
