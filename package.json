@@ -5,7 +5,7 @@
   "type": "module",
   "main": "src/index.js",
   "bin": {
-    "continente-mcp": "./src/index.js"
+    "continente-mcp": "src/index.js"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -30,7 +30,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/davidmarqu3s/continente-mcp.git"
+    "url": "git+https://github.com/davidmarqu3s/continente-mcp.git"
   },
   "homepage": "https://github.com/davidmarqu3s/continente-mcp",
   "bugs": {
