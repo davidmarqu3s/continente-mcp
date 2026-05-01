@@ -2,33 +2,32 @@
 """
 Continente Session Keepalive
 
-Pings continente.pt every run to reset the idle session timeout.
-Saves any updated cookies back to ~/.continente/cookies.json and the vault.
-If the session has expired, re-reads cookies from Arc and re-pings.
+Pings continente.pt to reset the idle session timeout.
+If the session has expired, re-reads cookies from your browser automatically.
 
-Run via LaunchAgent every 20 minutes.
+Run every 20 minutes via cron or launchd:
+  */20 * * * * python3 /path/to/continente-keepalive.py >> ~/.continente/keepalive.log 2>&1
 """
 import json
-import platform
+import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
 
 import requests
 
-IS_MAC = platform.system() == "Darwin"
-
-LOCAL_COOKIE = Path.home() / ".continente" / "cookies.json"
-VAULT_COOKIE = (
-    Path.home()
-    / "Library/Mobile Documents/iCloud~md~obsidian/Documents/vault"
-    / "_claude/continente/cookies.json"
-) if IS_MAC else (
-    Path.home() / "vault" / "_claude" / "continente" / "cookies.json"
+LOCAL_COOKIE = Path(
+    os.environ.get("CONTINENTE_COOKIES_PATH", str(Path.home() / ".continente" / "cookies.json"))
 )
 PING_URL = "https://www.continente.pt/on/demandware.store/Sites-continente-Site/default/Account-Show"
 CHECK_URL = "https://www.continente.pt/conta/encomendas/"
 LOG_PREFIX = "[continente-keepalive]"
+
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+)
 
 
 def log(msg: str) -> None:
@@ -46,15 +45,10 @@ def load_cookies(path: Path) -> list[dict] | None:
         return None
 
 
-def cookies_to_jar(cookies: list[dict]) -> dict:
-    return {c["name"]: c["value"] for c in cookies if c.get("name") and c["name"] != "undefined"}
-
-
 def save_cookies(cookies: list[dict]) -> None:
     LOCAL_COOKIE.parent.mkdir(parents=True, exist_ok=True)
     LOCAL_COOKIE.write_text(json.dumps(cookies, indent=2, ensure_ascii=False))
-    VAULT_COOKIE.parent.mkdir(parents=True, exist_ok=True)
-    VAULT_COOKIE.write_text(json.dumps(cookies, indent=2, ensure_ascii=False))
+    os.chmod(LOCAL_COOKIE, stat.S_IRUSR | stat.S_IWUSR)
 
 
 def is_logged_in(session: requests.Session) -> bool:
@@ -65,27 +59,30 @@ def is_logged_in(session: requests.Session) -> bool:
         return False
 
 
-def refresh_from_arc() -> list[dict] | None:
-    """Re-run the cookie reader script to pull fresh cookies from Arc."""
+def refresh_from_browser() -> list[dict] | None:
+    """Re-run continente-cookie-reader.py to pull fresh cookies from the browser."""
     script = Path(__file__).parent / "continente-cookie-reader.py"
     if not script.exists():
+        log("continente-cookie-reader.py not found next to this script.")
         return None
     try:
         result = subprocess.run(
             [sys.executable, str(script)],
             capture_output=True, text=True, timeout=30
         )
-        log(f"Cookie reader: {result.stdout.strip() or result.stderr.strip()}")
-        return load_cookies(VAULT_COOKIE)
+        output = (result.stdout + result.stderr).strip()
+        if output:
+            log(f"Cookie reader: {output}")
+        return load_cookies(LOCAL_COOKIE)
     except Exception as e:
         log(f"Cookie reader failed: {e}")
         return None
 
 
-def ping(cookies: list[dict]) -> tuple[bool, requests.Session]:
+def ping(cookies: list[dict]) -> bool:
     session = requests.Session()
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "User-Agent": USER_AGENT,
         "Accept-Language": "pt-PT,pt;q=0.9",
     })
     for c in cookies:
@@ -94,47 +91,43 @@ def ping(cookies: list[dict]) -> tuple[bool, requests.Session]:
 
     logged_in = is_logged_in(session)
     if logged_in:
-        # Touch the account page to reset idle timeout
         try:
             session.get(PING_URL, timeout=10)
         except Exception:
             pass
-    return logged_in, session
+    return logged_in
 
 
 def main() -> None:
-    cookies = load_cookies(LOCAL_COOKIE) or load_cookies(VAULT_COOKIE)
+    cookies = load_cookies(LOCAL_COOKIE)
 
     if not cookies:
-        if IS_MAC:
-            log("No cookies found — trying Arc...")
-            cookies = refresh_from_arc()
+        log("No cookies found — trying to refresh from browser...")
+        cookies = refresh_from_browser()
         if not cookies:
-            log("ERROR: No cookies found. Log into Continente in Arc (MacBook).")
+            log("ERROR: No cookies found. Run continente-cookie-reader.py first.")
             sys.exit(1)
 
-    logged_in, _ = ping(cookies)
-
-    if logged_in:
-        log("Session alive — ping successful.")
+    if ping(cookies):
+        log("Session alive.")
         save_cookies(cookies)
         return
 
-    if IS_MAC:
-        log("Session expired — refreshing from Arc...")
-        cookies = refresh_from_arc()
-        if not cookies:
-            log("ERROR: Could not refresh cookies from Arc.")
-            sys.exit(1)
-        logged_in, _ = ping(cookies)
-        if logged_in:
-            save_cookies(cookies)
-            log("Session restored from Arc.")
-            return
-        log("ERROR: Still not logged in after refresh. Log into Continente in Arc manually.")
-    else:
-        log("ERROR: Session expired. Log into Continente on MacBook — cookies will sync within 20 min.")
+    log("Session expired — refreshing from browser...")
+    cookies = refresh_from_browser()
+    if not cookies:
+        log("ERROR: Could not refresh cookies. Run continente-cookie-reader.py manually.")
+        sys.exit(1)
 
+    if ping(cookies):
+        save_cookies(cookies)
+        log("Session restored.")
+        return
+
+    log(
+        "ERROR: Still not logged in after refresh. "
+        "Log into Continente in your browser and re-run continente-cookie-reader.py."
+    )
     sys.exit(1)
 
 

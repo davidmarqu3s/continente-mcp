@@ -1,16 +1,52 @@
 {
   "name": "continente-mcp",
-  "version": "1.0.0",
-  "description": "MCP server for Continente supermarket",
+  "version": "3.1.0",
+  "description": "MCP server for Continente.pt — search products, manage your cart, and browse order history from your AI assistant.",
   "type": "module",
   "main": "src/index.js",
+  "bin": {
+    "continente-mcp": "./src/index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "start": "node src/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "setup": "playwright install chromium --with-deps",
+    "test": "echo \"No tests yet\" && exit 0"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "continente",
+    "supermarket",
+    "portugal",
+    "claude",
+    "ai-assistant",
+    "shopping",
+    "cart"
+  ],
+  "author": "David Marques",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/davidmarqu3s/continente-mcp.git"
+  },
+  "homepage": "https://github.com/davidmarqu3s/continente-mcp",
+  "bugs": {
+    "url": "https://github.com/davidmarqu3s/continente-mcp/issues"
+  },
+  "files": [
+    "src/",
+    "skills/",
+    "continente-cookie-reader.py",
+    "continente-keepalive.py",
+    "continente-backup.js",
+    "check-change.js",
+    ".env.example",
+    "LICENSE",
+    "README.md"
+  ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "cheerio": "^1.2.0",

@@ -3,39 +3,40 @@
  * Continente Order Backup — incremental
  *
  * Checks for orders not yet in the backup, fetches their details,
- * and appends them. Saves to ~/.continente/orders-backup.json and vault.
+ * and appends them. Run daily via cron.
  *
- * Run daily via cron.
+ * Usage:
+ *   node continente-backup.js
+ *
+ * Output:
+ *   ~/.continente/orders-backup.json
  */
 import { chromium } from 'playwright';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { normalizeCookies } from './src/utils.js';
+import os from 'os';
 
-const CONTINENTE_BASE  = 'https://www.continente.pt';
-const STATE_DIR        = `${process.env.HOME}/.continente`;
-const BACKUP_FILE      = `${STATE_DIR}/orders-backup.json`;
-
-// Platform-aware vault path
-const IS_MAC   = process.platform === 'darwin';
-const VAULT_BACKUP = IS_MAC
-  ? `${process.env.HOME}/Library/Mobile Documents/iCloud~md~obsidian/Documents/vault/_claude/continente/orders-backup.json`
-  : `${process.env.HOME}/vault/_claude/continente/orders-backup.json`;
+const CONTINENTE_BASE = 'https://www.continente.pt';
+const STATE_DIR       = `${os.homedir()}/.continente`;
+const BACKUP_FILE     = `${STATE_DIR}/orders-backup.json`;
+const COOKIE_FILE     = `${STATE_DIR}/cookies.json`;
 
 const log = (...args) => console.error('[backup]', ...args);
 
 // ─── Cookie helpers ───────────────────────────────────────────────────────────
 
 function loadCookies() {
-  const paths = [
-    `${STATE_DIR}/cookies.json`,
-    VAULT_BACKUP.replace('orders-backup.json', 'cookies.json'),
-  ];
-  for (const p of paths) {
-    if (existsSync(p)) {
-      try { return JSON.parse(readFileSync(p, 'utf8')); } catch {}
-    }
+  if (!existsSync(COOKIE_FILE)) {
+    log(`No cookies found at ${COOKIE_FILE}`);
+    log('Run: python3 continente-cookie-reader.py');
+    return null;
   }
-  return null;
+  try {
+    return JSON.parse(readFileSync(COOKIE_FILE, 'utf8'));
+  } catch (e) {
+    log('Failed to parse cookies:', e.message);
+    return null;
+  }
 }
 
 // ─── Scraping helpers ─────────────────────────────────────────────────────────
@@ -44,7 +45,7 @@ async function getOrderLinks(page) {
   await page.goto(`${CONTINENTE_BASE}/conta/encomendas/`, { waitUntil: 'networkidle', timeout: 30000 });
   await page.waitForTimeout(3000);
 
-  if (page.url().includes('/login')) throw new Error('Not authenticated');
+  if (page.url().includes('/login')) throw new Error('Not authenticated — cookies may have expired');
 
   return page.evaluate(() => {
     const seen = new Set();
@@ -93,6 +94,9 @@ async function getOrderDetail(page, url) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
+  const cookies = loadCookies();
+  if (!cookies) process.exit(1);
+
   // Load existing backup
   let backup = { backedUpAt: null, orderCount: 0, orders: [] };
   if (existsSync(BACKUP_FILE)) {
@@ -100,12 +104,9 @@ async function main() {
   }
   const knownUrls = new Set(backup.orders.map(o => o.url).filter(Boolean));
 
-  const cookies = loadCookies();
-  if (!cookies) { log('No cookies found — aborting'); process.exit(1); }
-
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    userAgent: getPlatformUserAgent(),
     locale: 'pt-PT',
   });
   await context.addCookies(normalizeCookies(cookies));
@@ -124,7 +125,7 @@ async function main() {
   log(`${orderLinks.length} orders on site, ${knownUrls.size} already backed up, ${newLinks.length} new`);
 
   if (newLinks.length === 0) {
-    log('Nothing to do.');
+    log('Nothing new to backup.');
     await browser.close();
     return;
   }
@@ -142,26 +143,24 @@ async function main() {
     }
   }
 
-  // Prepend new orders (most recent first) and save
-  backup.orders = [...newOrders, ...backup.orders];
+  backup.orders    = [...newOrders, ...backup.orders];
   backup.orderCount = backup.orders.filter(o => !o.error).length;
   backup.backedUpAt = new Date().toISOString();
 
   mkdirSync(STATE_DIR, { recursive: true });
-  const json = JSON.stringify(backup, null, 2);
-  writeFileSync(BACKUP_FILE, json);
+  writeFileSync(BACKUP_FILE, JSON.stringify(backup, null, 2));
+  log(`Done — added ${newOrders.length} orders. Total: ${backup.orderCount} → ${BACKUP_FILE}`);
 
-  // Sync to vault
-  try {
-    mkdirSync(VAULT_BACKUP.replace(/\/[^/]+$/, ''), { recursive: true });
-    writeFileSync(VAULT_BACKUP, json);
-    log(`Vault updated: ${VAULT_BACKUP}`);
-  } catch (e) {
-    log(`Vault sync failed (ok if on Optiplex without iCloud): ${e.message}`);
-  }
-
-  log(`Done — added ${newOrders.length} orders. Total: ${backup.orderCount}`);
   await browser.close();
+}
+
+function getPlatformUserAgent() {
+  if (process.platform === 'win32') {
+    return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
+  } else if (process.platform === 'linux') {
+    return 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
+  }
+  return 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
 }
 
 main().catch(e => { log('Fatal:', e.message); process.exit(1); });

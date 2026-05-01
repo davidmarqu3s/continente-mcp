@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -7,7 +8,16 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { normalizeCookies } from './utils.js';
 
 const CONTINENTE_BASE = 'https://www.continente.pt';
-const STATE_DIR = `${process.env.HOME}/.continente`;
+const STATE_DIR = process.env.CONTINENTE_STATE_DIR || `${process.env.HOME}/.continente`;
+
+function getPlatformUserAgent() {
+  if (process.platform === 'win32') {
+    return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
+  } else if (process.platform === 'linux') {
+    return 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
+  }
+  return 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
+}
 
 // ─── Browser / Session ───────────────────────────────────────────────────────
 
@@ -20,7 +30,7 @@ async function ensureBrowser() {
   
   browser = await chromium.launch({ headless: true });
   context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    userAgent: getPlatformUserAgent(),
     locale: 'pt-PT'
   });
 
@@ -368,7 +378,7 @@ function rankByPreference(products, preferences) {
 class ContinenteServer {
   constructor() {
     this.server = new Server(
-      { name: 'continente-mcp', version: '3.0.0' },
+      { name: 'continente-mcp', version: '3.1.0' },
       { capabilities: { tools: {} } }
     );
     this.setupTools();
@@ -574,11 +584,11 @@ class ContinenteServer {
 
   async handle_most_bought() {
     const result = await getMostBought();
-    if (!Array.isArray(result) || result.length === 0) {
-      return { content: [{ type: 'text', text: 'Could not calculate most bought items from order history.' }] };
-    }
     if (result.error) {
       return { content: [{ type: 'text', text: result.error === 'not_authenticated' ? 'Not logged in — cookies may have expired.' : `Error: ${result.error}` }] };
+    }
+    if (!Array.isArray(result) || result.length === 0) {
+      return { content: [{ type: 'text', text: 'Could not calculate most bought items from order history.' }] };
     }
     const top = result.slice(0, 25);
     const list = top.map((item, i) =>
@@ -595,7 +605,7 @@ class ContinenteServer {
   async start() {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error('Continente MCP v3 started');
+    console.error('Continente MCP v3.1.0 started');
   }
 }
 
