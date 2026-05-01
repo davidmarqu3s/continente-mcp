@@ -33,15 +33,9 @@ Lets your AI assistant search products, manage your shopping cart, and browse or
 
 ## Setup
 
-### 1. Install
+### 1. Clone and install
 
-```bash
-npm install -g continente-mcp
-```
-
-Or run without installing via npx (see [Configure your MCP client](#3-configure-your-mcp-client)).
-
-To clone locally instead:
+The setup requires the repository — the Python cookie scripts live here and are needed before the server can authenticate.
 
 ```bash
 git clone https://github.com/davidmarqu3s/continente-mcp
@@ -49,7 +43,7 @@ cd continente-mcp
 npm install
 ```
 
-Then install the Chromium browser that Playwright uses internally:
+Install the Chromium browser that Playwright uses internally:
 
 ```bash
 npm run setup
@@ -57,6 +51,8 @@ npm run setup
 ```
 
 > **Linux note:** `--with-deps` installs OS-level dependencies via apt. On macOS and Windows this flag is a no-op — `npx playwright install chromium` is sufficient.
+
+Once set up, you can run the server either via the local clone or via `npx continente-mcp` — both work in your MCP client config (see [step 3](#3-configure-your-mcp-client)).
 
 ### 2. Export your cookies
 
