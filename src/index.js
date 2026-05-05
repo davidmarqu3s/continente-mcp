@@ -6,6 +6,7 @@ import { chromium } from 'playwright';
 import * as cheerio from 'cheerio';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { normalizeCookies } from './utils.js';
+import { normalizeCartProductId, quantityForCartUpdate } from './cart-utils.js';
 
 const CONTINENTE_BASE = 'https://www.continente.pt';
 const STATE_DIR = process.env.CONTINENTE_STATE_DIR || `${process.env.HOME}/.continente`;
@@ -181,6 +182,80 @@ async function getCart() {
 
     return items;
   });
+}
+
+async function updateCartItem(productId, quantity) {
+  await goto(`${CONTINENTE_BASE}/checkout/carrinho/`);
+
+  if (page.url().includes('/login')) return { error: 'not_authenticated' };
+
+  const cartPid = normalizeCartProductId(productId);
+  const updateData = await page.evaluate(({ cartPid }) => {
+    const item = Array.from(document.querySelectorAll('[data-pid][data-product-name]'))
+      .find(el => el.dataset.pid === cartPid || el.querySelector(`input.add-to-cart-quantity[data-pid="${cartPid}-master"]`));
+
+    if (!item) return { error: 'not_found' };
+
+    const updateEl = item.querySelector('.ct-tile-quantity-update');
+    const qtyInput = item.querySelector('input.add-to-cart-quantity');
+    if (!updateEl || !qtyInput) return { error: 'missing_quantity_controls' };
+
+    let measureOptions = {};
+    try {
+      measureOptions = updateEl.dataset.measureOptions ? JSON.parse(updateEl.dataset.measureOptions) : {};
+    } catch {
+      measureOptions = {};
+    }
+
+    const updateUrl = updateEl.dataset.action;
+    const uuid = updateEl.dataset.uuid || item.dataset.uuid;
+    if (!updateUrl || !uuid) return { error: 'missing_update_data' };
+
+    return {
+      updateUrl,
+      uuid,
+      measureOptions,
+      gtmIndex: item.dataset.idx || '1'
+    };
+  }, { cartPid });
+
+  if (updateData.error) return { success: false, error: updateData.error };
+
+  const formattedQuantity = quantityForCartUpdate(quantity, updateData.measureOptions);
+  const conversion = Number(updateData.measureOptions.primaryToSecondary || updateData.measureOptions.unitConversionRate);
+  const step = Number(updateData.measureOptions.stepQuantity || conversion || 1).toString();
+  const dimension = updateData.measureOptions.secondaryunit || updateData.measureOptions.primaryunit || 'un';
+
+  const params = new URLSearchParams({
+    pid: cartPid,
+    quantity: formattedQuantity,
+    step,
+    uuid: updateData.uuid,
+    dimension,
+    isCart: 'true',
+    gtmList: 'Checkout',
+    gtmIndex: updateData.gtmIndex,
+    promotionData: 'null',
+    taggstarPromotionData: ''
+  });
+
+  try {
+    const res = await context.request.get(`${updateData.updateUrl}?${params.toString()}`, {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      timeout: 10000
+    });
+    if (!res.ok()) return { success: false, status: res.status(), error: `HTTP ${res.status()}` };
+
+    await page.waitForTimeout(1000);
+    return {
+      success: true,
+      product_id: cartPid,
+      requested_quantity: quantity,
+      cart_quantity: formattedQuantity
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 }
 
 async function addToCart(productId, quantity = 1) {
@@ -425,6 +500,18 @@ class ContinenteServer {
           }
         },
         {
+          name: 'update_cart_item',
+          description: 'Set the quantity for a product already in the cart by product ID. Use quantity 0 to remove the line if the site supports it.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              product_id: { type: 'string', description: 'Product ID from search results or cart item' },
+              quantity: { type: 'number', description: 'Desired cart quantity' }
+            },
+            required: ['product_id', 'quantity']
+          }
+        },
+        {
           name: 'get_order_history',
           description: 'Get your recent order history from your account.',
           inputSchema: {
@@ -466,6 +553,8 @@ class ContinenteServer {
             return await this.handle_get_cart();
           case 'add_to_cart':
             return await this.handle_add_to_cart(args.product_id, args.quantity || 1);
+          case 'update_cart_item':
+            return await this.handle_update_cart_item(args.product_id, args.quantity);
           case 'get_order_history':
             return await this.handle_order_history(args.limit || 5);
           case 'get_most_bought':
@@ -560,6 +649,20 @@ class ContinenteServer {
       return { content: [{ type: 'text', text: `✅ Added to cart! (${quantity}x)\n\nUse get_cart to review.` }] };
     }
     return { content: [{ type: 'text', text: `⚠️ ${result.message || 'Could not add to cart.'}` }], isError: true };
+  }
+
+  async handle_update_cart_item(productId, quantity) {
+    const result = await updateCartItem(productId, quantity);
+    if (result?.error === 'not_authenticated') {
+      return { content: [{ type: 'text', text: 'Not logged in — cookies may have expired. Re-sync your cookies.' }], isError: true };
+    }
+    if (result?.error === 'not_found') {
+      return { content: [{ type: 'text', text: `Product ${productId} is not in the cart.` }], isError: true };
+    }
+    if (result.success) {
+      return { content: [{ type: 'text', text: `✅ Updated cart item ${productId} to ${quantity}.\n\nUse get_cart to review.` }] };
+    }
+    return { content: [{ type: 'text', text: `⚠️ ${result.error || 'Could not update cart item.'}` }], isError: true };
   }
 
   async handle_order_history(limit) {

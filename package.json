@@ -13,7 +13,7 @@
   "scripts": {
     "start": "node src/index.js",
     "setup": "playwright install chromium --with-deps",
-    "test": "echo \"No tests yet\" && exit 0"
+    "test": "node --test"
   },
   "keywords": [
     "mcp",

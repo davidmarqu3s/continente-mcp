@@ -40,6 +40,8 @@ If confidence is high (clear favourite or obvious top result), add silently and 
 
 Call `add_to_cart` with `product_id`. Default quantity is 1 unless specified (e.g. "2 pacotes de leite").
 
+After adding products with a requested quantity greater than 1, call `get_cart` and verify the displayed quantity. Some Continente products use internal weighted units, so the quantity returned by `add_to_cart` can differ from the requested display quantity. If the cart quantity is wrong, call `update_cart_item` with the same `product_id` and the desired displayed quantity, then call `get_cart` again.
+
 ## Output format
 
 After all items are processed, print a compact summary:
@@ -47,6 +49,7 @@ After all items are processed, print a compact summary:
 ```
 ✓ Queijo Flamengo Mil Vacas 400g — added (from favourites)
 ✓ Leite Mimosa Meio-Gordo 1L — added
+✓ Banana Continente — quantity set to 12
 ✗ Pão de Forma — unclear match, please check manually
 ```
 

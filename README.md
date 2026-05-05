@@ -2,7 +2,7 @@
 
 Turn your AI assistant into a Continente shopping helper.
 
-`continente-mcp` is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server for [Continente.pt](https://www.continente.pt), Portugal's largest supermarket chain. It connects Claude, Cursor, Windsurf, and other MCP clients to your real Continente account so they can search the catalogue, prefer the products you already buy, inspect your basket, and add items for you.
+`continente-mcp` is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server for [Continente.pt](https://www.continente.pt), Portugal's largest supermarket chain. It connects Claude, Codex, Cursor, Windsurf, and other MCP clients to your real Continente account so they can search the catalogue, prefer the products you already buy, inspect your basket, add items, and correct quantities for you.
 
 Instead of clicking through the website for the same groceries every week, you can ask:
 
@@ -31,6 +31,7 @@ The useful bit is not just product search. The server can use your favourites an
 | `refresh_favorites` | Re-sync favourites from the website |
 | `get_cart` | View your current basket |
 | `add_to_cart` | Add a product by ID |
+| `update_cart_item` | Set the quantity for a product already in the basket |
 | `get_order_history` | Recent orders with product lines |
 | `get_most_bought` | Products you order most often (scans all orders — slow) |
 | `close_session` | Close the browser and free memory |
@@ -41,7 +42,7 @@ The useful bit is not just product search. The server can use your favourites an
 
 - **Shop in plain language:** ask for groceries by name and let your assistant resolve the Continente product IDs.
 - **Use your actual preferences:** favourites and order history help distinguish "the milk I buy" from every other milk in the catalogue.
-- **Build a basket, not just a list:** add products directly to your Continente cart, then checkout on the official website.
+- **Build a basket, not just a list:** add products directly to your Continente cart, adjust quantities, then checkout on the official website.
 - **No password handling:** authentication comes from your existing browser session cookies.
 - **Works with standard MCP clients:** run it locally with `npx continente-mcp` or from a cloned repo.
 - **Agent skill included:** the bundled `groceries` skill teaches compatible agents how to match items against favourites and order history before adding them.
@@ -75,9 +76,47 @@ Restart your MCP client, then ask your assistant to:
 1. Run `refresh_favorites` once, so product search can rank your saved favourites.
 2. Search for a product, for example `search_products` with `leite`.
 3. Add the chosen `product_id` with `add_to_cart`.
-4. Review the basket with `get_cart`.
+4. Correct quantities with `update_cart_item` if needed.
+5. Review the basket with `get_cart`.
 
 The detailed setup below covers local-clone config, Windows paths, keepalive, security, and troubleshooting.
+
+## Copy-paste install prompt
+
+If you use an AI coding agent such as Codex, Claude Code, Cursor, or Windsurf, you can paste this into a new session and let it do the local setup:
+
+```text
+Please install and configure continente-mcp on this machine.
+
+Goal:
+- I want my MCP client to use Continente.pt tools for product search, favourites, cart review, adding products, and quantity corrections.
+
+Please do the following:
+1. Check that Node.js 18+ and Python 3.10+ are installed.
+2. Clone https://github.com/davidmarqu3s/continente-mcp if it is not already present.
+3. Run npm install in the repo.
+4. Install Playwright Chromium with npm run setup, or npx playwright install chromium if that is more appropriate for my OS.
+5. Install the Python cookie-reader dependencies: browser-cookie3 and requests.
+6. Ask me to log into https://www.continente.pt in my normal browser.
+7. Run continente-cookie-reader.py to export Continente cookies to ~/.continente/cookies.json.
+8. Add an MCP server named "continente" to my MCP client config.
+   Use npx if possible:
+   {
+     "mcpServers": {
+       "continente": {
+         "command": "npx",
+         "args": ["continente-mcp"]
+       }
+     }
+   }
+9. Restart or ask me to restart the MCP client.
+10. Verify the server by listing tools and, if possible, calling get_cart.
+
+Important:
+- Do not print cookie values, addresses, order details, tokens, or secrets.
+- Do not place an order or checkout.
+- If get_cart says I am not logged in, help me refresh cookies rather than continuing with cart actions.
+```
 
 ## How it works
 
@@ -155,7 +194,7 @@ Cookies are saved to `~/.continente/cookies.json` (`%USERPROFILE%\.continente\co
 
 ### 3. Configure your MCP client
 
-This server works with any [MCP-compatible client](https://modelcontextprotocol.io/clients). The config format is the same across most of them — add an entry under `mcpServers` pointing to the server command.
+This server works with MCP-compatible clients that can run local stdio MCP servers. That includes Claude Desktop, Codex, Cursor, Windsurf, and similar local agent tools. The config format is the same across most of them — add an entry under `mcpServers` pointing to the server command.
 
 **Via npx (no local install needed):**
 
@@ -189,11 +228,14 @@ Where to put this config:
 |--------|-------------|
 | Claude Desktop (Mac) | `~/Library/Application Support/Claude/claude_desktop_config.json` |
 | Claude Desktop (Windows) | `%APPDATA%\Claude\claude_desktop_config.json` |
+| Codex | `~/.codex/config.toml`, or add with the Codex MCP command |
 | Cursor (Mac/Linux) | `.cursor/mcp.json` in your project, or `~/.cursor/mcp.json` globally |
 | Cursor (Windows) | `.cursor\mcp.json` in your project, or `%USERPROFILE%\.cursor\mcp.json` globally |
 | Windsurf (Mac/Linux) | `~/.codeium/windsurf/mcp_config.json` |
 | Windsurf (Windows) | `%USERPROFILE%\.codeium\windsurf\mcp_config.json` |
 | Other clients | See your client's MCP documentation |
+
+**ChatGPT note:** ChatGPT developer mode supports MCP tools, including write actions, through remote MCP servers/connectors. This package is a local stdio server by default, so using it from ChatGPT requires wrapping or deploying it as a remote MCP server first. See OpenAI's [ChatGPT developer mode](https://platform.openai.com/docs/guides/developer-mode) and [MCP server guide](https://platform.openai.com/docs/mcp/) docs.
 
 ---
 
