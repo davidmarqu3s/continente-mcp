@@ -2,7 +2,7 @@
 
 Turn your AI assistant into a Continente shopping helper.
 
-`continente-mcp` is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server for [Continente.pt](https://www.continente.pt), Portugal's largest supermarket chain. It connects Claude, Codex, Cursor, Windsurf, and other MCP clients to your real Continente account so they can search the catalogue, prefer the products you already buy, inspect your basket, add items, and correct quantities for you.
+`continente-mcp` is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server for [Continente.pt](https://www.continente.pt), Portugal's largest supermarket chain. It connects Claude, Codex, Cursor, Windsurf, and other MCP clients to your Continente account so they can search the catalogue, prefer the products you already buy, inspect your basket, add items, and correct quantities for you.
 
 Instead of clicking through the website for the same groceries every week, you can ask:
 
@@ -14,15 +14,15 @@ Instead of clicking through the website for the same groceries every week, you c
 >
 > "Show me the products I order most often."
 
-The useful bit is not just product search. The server can use your favourites and order history as buying context, so an assistant can pick the right brand, size, and variant more often than a plain search result would.
+Search alone isn't enough. The server feeds the assistant your favourites and order history as context, so it can usually pick the brand, size, and variant you wanted without you spelling it out.
 
-> **⚠️ Stability note:** This server works by automating a real browser session against Continente's website using CSS selectors. If Continente updates their site structure, some tools may need code updates.
+> **⚠️ Stability note:** This server drives a headless browser against Continente's website using CSS selectors. If Continente updates their site structure, some tools may need code updates.
 
 ---
 
 ## What it can do
 
-`continente-mcp` gives your assistant the primitives it needs to handle a real shopping session:
+The server exposes these tools:
 
 | Tool | Description |
 |------|-------------|
@@ -41,11 +41,11 @@ The useful bit is not just product search. The server can use your favourites an
 ## Why use it
 
 - **Shop in plain language:** ask for groceries by name and let your assistant resolve the Continente product IDs.
-- **Use your actual preferences:** favourites and order history help distinguish "the milk I buy" from every other milk in the catalogue.
-- **Build a basket, not just a list:** add products directly to your Continente cart, adjust quantities, then checkout on the official website.
+- **Uses your buying history:** favourites and past orders help distinguish "the milk I buy" from every other milk in the catalogue.
+- **Adds straight to your cart:** products go into your Continente basket and you check out on the website as normal.
 - **No password handling:** authentication comes from your existing browser session cookies.
 - **Works with standard MCP clients:** run it locally with `npx continente-mcp` or from a cloned repo.
-- **Agent skill included:** the bundled `groceries` skill teaches compatible agents how to match items against favourites and order history before adding them.
+- **Agent skill included:** the bundled `groceries` skill matches items against favourites and order history before searching.
 
 ## Quick start
 
@@ -150,7 +150,7 @@ cd continente-mcp
 npm install
 ```
 
-Install the Chromium browser that Playwright uses internally:
+Install the Chromium build that Playwright uses:
 
 ```bash
 npm run setup
@@ -194,7 +194,7 @@ Cookies are saved to `~/.continente/cookies.json` (`%USERPROFILE%\.continente\co
 
 ### 3. Configure your MCP client
 
-This server works with MCP-compatible clients that can run local stdio MCP servers. That includes Claude Desktop, Codex, Cursor, Windsurf, and similar local agent tools. The config format is the same across most of them — add an entry under `mcpServers` pointing to the server command.
+Any MCP client that can run a local stdio server works: Claude Desktop, Codex, Cursor, Windsurf, and others. The config format is mostly identical — add an entry under `mcpServers` pointing to the server command.
 
 **Via npx (no local install needed):**
 
@@ -356,11 +356,11 @@ See [`.env.example`](./.env.example) for all options. The main ones:
 | Problem | What to try |
 |---------|-------------|
 | `Not logged in` or redirected to login | Re-run `continente-cookie-reader.py` after logging into Continente.pt in your browser. |
-| `No favorites loaded` | Ask the assistant to run `refresh_favorites` once. Search still works without favourites, but ranking is less personal. |
+| `No favorites loaded` | Ask the assistant to run `refresh_favorites` once. Search still works without favourites, but results won't be ranked by what you usually buy. |
 | Playwright browser missing | Run `npm run setup` from the repo, or `npx playwright install chromium`. |
 | Cookie reader cannot find cookies | Confirm you are logged in, then try `python3 continente-cookie-reader.py --list-browsers` and rerun with `--browser chrome`, `--browser firefox`, etc. |
 | Product search or cart parsing breaks | Continente may have changed its website structure. Open an issue with the failing tool, query/product, and what happened. |
-| `get_most_bought` is slow | This is expected on accounts with many orders because it scans order detail pages sequentially. |
+| `get_most_bought` is slow | Expected on accounts with many orders — it scans order detail pages sequentially. |
 
 ---
 
@@ -370,7 +370,7 @@ The [`skills/`](./skills/) directory contains ready-made agent skills for client
 
 ### groceries
 
-Adds items to the basket by name. It matches against your favourites and order history before searching, so "add milk" can become the specific milk you actually tend to buy.
+Adds items to the basket by name. It matches against your favourites and order history before searching, so "add milk" becomes the specific milk you usually buy.
 
 Install it in Claude Code:
 
