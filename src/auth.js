@@ -61,14 +61,26 @@ export class Authenticator {
     try {
       const page = await this.ensureBrowser();
       await page.goto(CONTINENTE_MAIN, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      // Look for the account/logged-in state
-      const loginLink = await page.$('a[href*="logout"], a[href*="sair"], [class*="user"], [class*="account"]');
+
+      // Check for known authenticated UI signals.
+      const authSignal = await page.$(
+        'a[href*="logout"], a[href*="sair"], [data-testid*="user"], [class*="logged-in"], [class*="account"]'
+      );
+
+      if (authSignal) return true;
+
+      // Fallback: inspect cookie set after potential redirects.
+      const cookies = await this.context.cookies();
+      const hasSessionCookie = cookies.some(c =>
+        c.name && /session|auth|jwt|token|customer/i.test(c.name) && c.value
+      );
+
+      if (hasSessionCookie) return true;
+
       const pageContent = await page.content();
-      // If we see a logged-in indicator (e.g., user name in header)
-      const isLogged = pageContent.includes('data-testid="user"') || 
-                       pageContent.includes('class="logged-in') ||
-                       pageContent.includes('bjzIjUWquR'); // some session marker
-      return false; // Conservative - always try to re-auth for now
+      return pageContent.includes('data-testid="user"') ||
+             pageContent.includes('class="logged-in') ||
+             pageContent.includes('A minha conta');
     } catch (e) {
       return false;
     }
