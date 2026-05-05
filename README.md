@@ -1,14 +1,28 @@
 # continente-mcp
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server for [Continente.pt](https://www.continente.pt) — Portugal's largest supermarket chain.
+Turn your AI assistant into a Continente shopping helper.
 
-Lets your AI assistant search products, manage your shopping cart, and browse order history using your real Continente account.
+`continente-mcp` is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server for [Continente.pt](https://www.continente.pt), Portugal's largest supermarket chain. It connects Claude, Cursor, Windsurf, and other MCP clients to your real Continente account so they can search the catalogue, prefer the products you already buy, inspect your basket, and add items for you.
 
-> **⚠️ Stability note:** This server works by automating a real browser session against Continente's website using CSS selectors. If Continente updates their site structure, some tools may break. See [Detecting changes](#detecting-changes).
+Instead of clicking through the website for the same groceries every week, you can ask:
+
+> "Add leite meio-gordo, ovos, bananas, and queijo flamengo to my Continente basket."
+>
+> "Find the olive oil I usually buy and add two bottles."
+>
+> "What's already in my cart?"
+>
+> "Show me the products I order most often."
+
+The useful bit is not just product search. The server can use your favourites and order history as buying context, so an assistant can pick the right brand, size, and variant more often than a plain search result would.
+
+> **⚠️ Stability note:** This server works by automating a real browser session against Continente's website using CSS selectors. If Continente updates their site structure, some tools may need code updates.
 
 ---
 
 ## What it can do
+
+`continente-mcp` gives your assistant the primitives it needs to handle a real shopping session:
 
 | Tool | Description |
 |------|-------------|
@@ -20,6 +34,60 @@ Lets your AI assistant search products, manage your shopping cart, and browse or
 | `get_order_history` | Recent orders with product lines |
 | `get_most_bought` | Products you order most often (scans all orders — slow) |
 | `close_session` | Close the browser and free memory |
+
+---
+
+## Why use it
+
+- **Shop in plain language:** ask for groceries by name and let your assistant resolve the Continente product IDs.
+- **Use your actual preferences:** favourites and order history help distinguish "the milk I buy" from every other milk in the catalogue.
+- **Build a basket, not just a list:** add products directly to your Continente cart, then checkout on the official website.
+- **No password handling:** authentication comes from your existing browser session cookies.
+- **Works with standard MCP clients:** run it locally with `npx continente-mcp` or from a cloned repo.
+- **Agent skill included:** the bundled `groceries` skill teaches compatible agents how to match items against favourites and order history before adding them.
+
+## Quick start
+
+```bash
+git clone https://github.com/davidmarqu3s/continente-mcp
+cd continente-mcp
+npm install
+npm run setup
+python3 -m pip install browser-cookie3 requests
+python3 continente-cookie-reader.py
+```
+
+Then add the server to your MCP client:
+
+```json
+{
+  "mcpServers": {
+    "continente": {
+      "command": "npx",
+      "args": ["continente-mcp"]
+    }
+  }
+}
+```
+
+Restart your MCP client, then ask your assistant to:
+
+1. Run `refresh_favorites` once, so product search can rank your saved favourites.
+2. Search for a product, for example `search_products` with `leite`.
+3. Add the chosen `product_id` with `add_to_cart`.
+4. Review the basket with `get_cart`.
+
+The detailed setup below covers local-clone config, Windows paths, keepalive, security, and troubleshooting.
+
+## How it works
+
+1. You log in to Continente.pt in your normal browser.
+2. The cookie reader exports only the Continente cookies to `~/.continente/cookies.json`.
+3. Your MCP client starts `continente-mcp`.
+4. The server uses a headless Chromium session to read Continente pages and call the cart endpoint.
+5. Your assistant receives structured tools for product search, favourites, cart, and order history.
+
+You always complete checkout on Continente.pt. This tool helps prepare the basket; it does not place orders or pay for anything.
 
 ---
 
@@ -35,7 +103,7 @@ Lets your AI assistant search products, manage your shopping cart, and browse or
 
 ### 1. Clone and install
 
-The setup requires the repository — the Python cookie scripts live here and are needed before the server can authenticate.
+The server can run from npm, but the first-time setup still needs this repository because the Python cookie scripts live here.
 
 ```bash
 git clone https://github.com/davidmarqu3s/continente-mcp
@@ -52,7 +120,7 @@ npm run setup
 
 > **Linux note:** `--with-deps` installs OS-level dependencies via apt. On macOS and Windows this flag is a no-op — `npx playwright install chromium` is sufficient.
 
-Once set up, you can run the server either via the local clone or via `npx continente-mcp` — both work in your MCP client config (see [step 3](#3-configure-your-mcp-client)).
+Once set up, you can run the server either through `npx continente-mcp` or via the local clone — both work in your MCP client config (see [step 3](#3-configure-your-mcp-client)).
 
 ### 2. Export your cookies
 
@@ -193,59 +261,6 @@ If the session expires, the keepalive script will automatically re-read cookies 
 
 ---
 
-## Detecting changes
-
-Run `check-change.js` on a schedule to get notified if Continente updates their site structure in a way that might break scraping:
-
-```bash
-# First run saves a structural fingerprint
-node check-change.js
-```
-
-**Linux / WSL (cron):**
-```bash
-# Daily at 9am
-0 9 * * * node /path/to/check-change.js >> ~/.continente/change-detector.log 2>&1
-```
-
-**macOS (launchd):** Add a plist similar to the keepalive one above, with `StartInterval` set to `86400`.
-
-**Windows (Task Scheduler):**
-```powershell
-schtasks /create /tn "ContinenteChangeDetector" /tr "node C:\path\to\check-change.js" /sc daily /st 09:00 /f
-```
-
-To receive a webhook notification (Slack, Discord, n8n, etc.) on change, set `CONTINENTE_ALERT_WEBHOOK` in your environment or MCP client config:
-
-```bash
-# macOS / Linux
-export CONTINENTE_ALERT_WEBHOOK=https://hooks.slack.com/services/...
-
-# Windows cmd
-set CONTINENTE_ALERT_WEBHOOK=https://hooks.slack.com/services/...
-
-# Windows PowerShell
-$env:CONTINENTE_ALERT_WEBHOOK = "https://hooks.slack.com/services/..."
-```
-
-Or add it to your MCP client config under `env` (platform-neutral):
-
-```json
-{
-  "mcpServers": {
-    "continente": {
-      "command": "npx",
-      "args": ["continente-mcp"],
-      "env": {
-        "CONTINENTE_ALERT_WEBHOOK": "https://hooks.slack.com/services/..."
-      }
-    }
-  }
-}
-```
-
----
-
 ## Utilities
 
 **Back up order history** (incremental — only fetches new orders):
@@ -285,11 +300,25 @@ See [`.env.example`](./.env.example) for all options. The main ones:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CONTINENTE_COOKIES_PATH` | `~/.continente/cookies.json` | Where cookies are read/written |
-| `CONTINENTE_STATE_DIR` | `~/.continente` | Directory for preferences, fingerprint, backups |
-| `CONTINENTE_ALERT_WEBHOOK` | — | Webhook URL for change detection alerts |
+| `CONTINENTE_STATE_DIR` | `~/.continente` | Directory for preferences and backups |
 | `CONTINENTE_VAULT_COOKIE_PATH` | — | Optional secondary path to also write cookies to (for multi-machine sync) |
 
+`CONTINENTE_COOKIES_PATH` is used by the Python cookie and keepalive utilities. The MCP server reads cookies from `CONTINENTE_STATE_DIR/cookies.json`, so if you customize one, make sure the server can still find the exported `cookies.json`.
+
 > **Windows:** Replace `~` with `%USERPROFILE%` (cmd) or `$env:USERPROFILE` (PowerShell). Node.js accepts both `/` and `\` as path separators.
+
+---
+
+## Troubleshooting
+
+| Problem | What to try |
+|---------|-------------|
+| `Not logged in` or redirected to login | Re-run `continente-cookie-reader.py` after logging into Continente.pt in your browser. |
+| `No favorites loaded` | Ask the assistant to run `refresh_favorites` once. Search still works without favourites, but ranking is less personal. |
+| Playwright browser missing | Run `npm run setup` from the repo, or `npx playwright install chromium`. |
+| Cookie reader cannot find cookies | Confirm you are logged in, then try `python3 continente-cookie-reader.py --list-browsers` and rerun with `--browser chrome`, `--browser firefox`, etc. |
+| Product search or cart parsing breaks | Continente may have changed its website structure. Open an issue with the failing tool, query/product, and what happened. |
+| `get_most_bought` is slow | This is expected on accounts with many orders because it scans order detail pages sequentially. |
 
 ---
 
@@ -299,7 +328,7 @@ The [`skills/`](./skills/) directory contains ready-made agent skills for client
 
 ### groceries
 
-Adds items to the basket by name. Matches against your favourites and order history to pick the right product variant automatically.
+Adds items to the basket by name. It matches against your favourites and order history before searching, so "add milk" can become the specific milk you actually tend to buy.
 
 Install it in Claude Code:
 

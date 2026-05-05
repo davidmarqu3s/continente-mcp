@@ -42,7 +42,6 @@
     "continente-cookie-reader.py",
     "continente-keepalive.py",
     "continente-backup.js",
-    "check-change.js",
     ".env.example",
     "LICENSE",
     "README.md"
