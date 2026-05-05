@@ -119,12 +119,13 @@ function parseProducts(html, limit = 30) {
     const productId = idMatch ? idMatch[1] : null;
     if (!productId) return;
 
-    const cardText = $el.text().replace(/\s+/g, ' ').trim();
-    const priceMatch = cardText.match(/(\d+[,.]\d+)€/);
+    const primaryText = $el.find('.pwc-tile--price-primary').first().text().replace(/\s+/g, ' ').trim();
+    const priceMatch = primaryText.match(/(\d+[,.]\d+)€/);
     if (!priceMatch) return;
 
     const price = parseFloat(priceMatch[1].replace(',', '.'));
-    const unitMatch = cardText.match(/(\d+[,.]\d+€)\/([a-zA-Z]+)/);
+    const secondaryText = $el.find('.pwc-tile--price-secondary').first().text().replace(/\s+/g, ' ').trim();
+    const unitMatch = secondaryText.match(/(\d+[,.]\d+€)\/([a-zA-Z]+)/);
 
     const nameLink = $el.find('a[href*="/produto/"]').filter((_, a) => $(a).text().trim().length > 0).first();
     let name = nameLink.text().replace(/\s+/g, ' ').trim().substring(0, 100);
@@ -223,7 +224,6 @@ async function addToCart(productId, quantity = 1) {
 
 async function getOrderHistory(limit = 5) {
   await goto(`${CONTINENTE_BASE}/conta/encomendas/`);
-  await page.waitForTimeout(3000);
 
   if (page.url().includes('/login')) return { error: 'not_authenticated' };
 
@@ -265,7 +265,6 @@ async function getOrderHistory(limit = 5) {
 
 async function getOrderProducts(orderDetailUrl) {
   await page.goto(orderDetailUrl, { waitUntil: 'networkidle', timeout: 20000 });
-  await page.waitForTimeout(2000);
 
   return page.evaluate(() => {
     const products = [];
@@ -287,9 +286,8 @@ async function getOrderProducts(orderDetailUrl) {
   });
 }
 
-async function getMostBought() {
+async function getMostBought(limit = 10) {
   await goto(`${CONTINENTE_BASE}/conta/encomendas/`);
-  await page.waitForTimeout(3000);
 
   if (page.url().includes('/login')) return { error: 'not_authenticated' };
 
@@ -303,10 +301,10 @@ async function getMostBought() {
 
   if (orderLinks.length === 0) return { error: 'no_orders' };
 
-  // Tally products across all orders
+  // Tally products across recent orders
   const tally = new Map(); // name -> { qty, orders }
 
-  for (const link of orderLinks) {
+  for (const link of orderLinks.slice(0, limit)) {
     try {
       const products = await getOrderProducts(link);
       for (const { name, qty } of products) {
@@ -438,8 +436,13 @@ class ContinenteServer {
         },
         {
           name: 'get_most_bought',
-          description: 'Get the products you buy most often, tallied across all orders. Scans every order page sequentially — slow on accounts with many orders.',
-          inputSchema: { type: 'object', properties: {} }
+          description: 'Get the products you buy most often, tallied across recent orders.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              limit: { type: 'number', description: 'Number of recent orders to scan (default: 10)' }
+            }
+          }
         },
         {
           name: 'close_session',
@@ -466,7 +469,7 @@ class ContinenteServer {
           case 'get_order_history':
             return await this.handle_order_history(args.limit || 5);
           case 'get_most_bought':
-            return await this.handle_most_bought();
+            return await this.handle_most_bought(args.limit || 10);
           case 'close_session':
             await closeBrowser();
             return { content: [{ type: 'text', text: 'Session closed.' }] };
@@ -504,9 +507,9 @@ class ContinenteServer {
   }
 
   async handle_favorites() {
-    const prefs = await getPreferences();
+    let prefs = await getPreferences();
     if (!prefs?.favorites?.length) {
-      return { content: [{ type: 'text', text: 'No favorites loaded. Run refresh_favorites first.' }] };
+      prefs = await updatePreferencesFromFavorites();
     }
 
     const list = prefs.favorites.map((f, i) =>
@@ -582,8 +585,8 @@ class ContinenteServer {
     };
   }
 
-  async handle_most_bought() {
-    const result = await getMostBought();
+  async handle_most_bought(limit) {
+    const result = await getMostBought(limit);
     if (result.error) {
       return { content: [{ type: 'text', text: result.error === 'not_authenticated' ? 'Not logged in — cookies may have expired.' : `Error: ${result.error}` }] };
     }
