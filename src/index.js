@@ -4,9 +4,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { chromium } from 'playwright';
 import * as cheerio from 'cheerio';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'fs';
 import { normalizeCookies } from './utils.js';
-import { normalizeCartProductId, quantityForCartUpdate } from './cart-utils.js';
+import { normalizeCartProductId, quantityForCartUpdate, summarizeCartState } from './cart-utils.js';
 
 const CONTINENTE_BASE = 'https://www.continente.pt';
 const STATE_DIR = process.env.CONTINENTE_STATE_DIR || `${process.env.HOME}/.continente`;
@@ -25,29 +25,43 @@ function getPlatformUserAgent() {
 let browser = null;
 let context = null;
 let page = null;
+let loadedCookieMtimeMs = null;
 
 async function ensureBrowser() {
-  if (browser) return browser;
-  
-  browser = await chromium.launch({ headless: true });
-  context = await browser.newContext({
-    userAgent: getPlatformUserAgent(),
-    locale: 'pt-PT'
-  });
-
-  // Load cookies from file
   const cookieFile = `${STATE_DIR}/cookies.json`;
-  if (existsSync(cookieFile)) {
-    try {
-      const cookies = JSON.parse(readFileSync(cookieFile, 'utf8'));
-      const normalized = normalizeCookies(cookies);
-      await context.addCookies(normalized);
-    } catch (e) {
-      console.error('Failed to load cookies:', e.message);
+  const nextCookieMtimeMs = existsSync(cookieFile) ? statSync(cookieFile).mtimeMs : null;
+
+  if (context && loadedCookieMtimeMs !== nextCookieMtimeMs) {
+    if (page) { try { await page.close(); } catch (e) {} page = null; }
+    if (context) { try { await context.close(); } catch (e) {} context = null; }
+  }
+
+  if (!browser) {
+    browser = await chromium.launch({ headless: true });
+  }
+
+  if (!context) {
+    context = await browser.newContext({
+      userAgent: getPlatformUserAgent(),
+      locale: 'pt-PT'
+    });
+
+    // Load cookies from file
+    if (existsSync(cookieFile)) {
+      try {
+        const cookies = JSON.parse(readFileSync(cookieFile, 'utf8'));
+        const normalized = normalizeCookies(cookies);
+        await context.addCookies(normalized);
+        loadedCookieMtimeMs = nextCookieMtimeMs;
+      } catch (e) {
+        console.error('Failed to load cookies:', e.message);
+      }
     }
   }
 
-  page = await context.newPage();
+  if (!page) {
+    page = await context.newPage();
+  }
   return browser;
 }
 
@@ -62,6 +76,7 @@ async function closeBrowser() {
   if (page) { try { await page.close(); } catch(e) {} page = null; }
   if (context) { try { await context.close(); } catch(e) {} context = null; }
   if (browser) { try { await browser.close(); } catch(e) {} browser = null; }
+  loadedCookieMtimeMs = null;
 }
 
 // ─── Favorites / Preferences ───────────────────────────────────────────────────
@@ -153,35 +168,24 @@ function parseProducts(html, limit = 30) {
 // ─── Cart ─────────────────────────────────────────────────────────────────────
 
 async function getCart() {
-  await goto(`${CONTINENTE_BASE}/checkout/carrinho/`);
+  await ensureBrowser();
 
-  if (page.url().includes('/login')) return { error: 'not_authenticated' };
+  try {
+    const res = await context.request.get(
+      `${CONTINENTE_BASE}/on/demandware.store/Sites-continente-Site/default/Cart-MiniCartShow`,
+      {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        timeout: 10000
+      }
+    );
 
-  return page.evaluate(() => {
-    const cartList = document.querySelector('.js-cart-product-list');
-    if (!cartList) return [];
+    if (!res.ok()) return { error: `http_${res.status()}` };
 
-    const seen = new Set();
-    const items = [];
-
-    cartList.querySelectorAll('[data-pid][data-product-name]').forEach(el => {
-      const pid = el.dataset.pid;
-      const name = el.dataset.productName;
-      if (!name || seen.has(pid)) return;
-      seen.add(pid);
-
-      const priceEl = el.querySelector('.pwc-tile--price-primary');
-      const priceText = priceEl?.textContent?.trim().replace(/[^\d,]/g, '').replace(',', '.');
-      const price = priceText ? parseFloat(priceText) : null;
-
-      const qtyInput = el.querySelector('input.add-to-cart-quantity');
-      const qty = qtyInput ? parseInt(qtyInput.value) || 1 : 1;
-
-      items.push({ name, price, qty });
-    });
-
-    return items;
-  });
+    const payload = await res.json();
+    return summarizeCartState(payload);
+  } catch (e) {
+    return { error: e.message };
+  }
 }
 
 async function updateCartItem(productId, quantity) {
@@ -286,11 +290,27 @@ async function addToCart(productId, quantity = 1) {
         signal: AbortSignal.timeout(10000)
       });
       const json = await res.json();
-      return { success: res.ok, status: res.status, cartCount: json?.quantityTotal, error: json?.message };
+      return { success: res.ok, status: res.status, payload: json, error: json?.message };
     } catch (e) {
       return { success: false, message: e.message };
     }
   }, quantity);
+
+  const cartState = summarizeCartState(result.payload);
+  const numericPid = normalizeCartProductId(productId);
+  const productPresent = cartState.items.some(item => item.id === numericPid);
+  const isAuthenticated = result.payload?.resources?.customerAuthenticated !== false;
+
+  if (!result.success || result.payload?.error || !productPresent || !isAuthenticated) {
+    return {
+      success: false,
+      status: result.status,
+      message: !isAuthenticated
+        ? 'Session is not authenticated to a Continente account.'
+        : result.error || result.payload?.message || 'Could not confirm product was added to the cart.',
+      cartState
+    };
+  }
 
   return result;
 }
@@ -624,21 +644,27 @@ class ContinenteServer {
   }
 
   async handle_get_cart() {
-    const items = await getCart();
-    if (items?.error === 'not_authenticated') {
+    const cart = await getCart();
+    if (cart?.error === 'not_authenticated') {
       return { content: [{ type: 'text', text: 'Not logged in — cookies may have expired. Re-run the cookie sync script.' }] };
     }
-    if (!Array.isArray(items) || items.length === 0) {
+    if (cart?.error) {
+      return { content: [{ type: 'text', text: `Could not load cart. (${cart.error})` }], isError: true };
+    }
+    if (!Array.isArray(cart.items) || cart.items.length === 0) {
       return { content: [{ type: 'text', text: '🛒 Cart is empty.' }] };
     }
-    const total = items.reduce((s, i) => s + (i.price || 0) * i.qty, 0);
-    const list = items.map((item, i) =>
+    const total = cart.total || cart.items.reduce((s, i) => s + (i.price || 0) * i.qty, 0);
+    const list = cart.items.map((item, i) =>
       `${i + 1}. ${item.name}\n   Qtd: ${item.qty} × ${item.price?.toFixed(2) || '?'}€`
     ).join('\n');
+    const authNote = cart.customerAuthenticated
+      ? ''
+      : '\n\n⚠️ Session is not authenticated to a Continente account. This is the current storefront cart, which may differ from the basket in your logged-in browser.';
     return {
       content: [{
         type: 'text',
-        text: `🛒 Cart (${items.length} items):\n\n${list}\n\n💶 Total: ${total.toFixed(2)}€\n\nGo to https://www.continente.pt/checkout/carrinho/ to checkout.`
+        text: `🛒 Cart (${cart.items.length} items):\n\n${list}\n\n💶 Total: ${total.toFixed(2)}€${authNote}\n\nGo to https://www.continente.pt/checkout/carrinho/ to checkout.`
       }]
     };
   }

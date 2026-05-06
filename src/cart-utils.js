@@ -22,3 +22,35 @@ export function quantityForCartUpdate(displayQuantity, measureOptions = {}) {
 
   return Number(cartQuantity.toFixed(3)).toString();
 }
+
+export function summarizeCartState(payload = {}) {
+  const customerAuthenticated = Boolean(payload?.resources?.customerAuthenticated);
+  const addItems = Array.isArray(payload?.cart?.items) ? payload.cart.items : null;
+  const miniCartGroups = Array.isArray(payload?.basket?.itemsSortedByBrand)
+    ? payload.basket.itemsSortedByBrand
+    : null;
+
+  const sourceItems = addItems || (miniCartGroups
+    ? miniCartGroups.flatMap(group => Array.isArray(group?.items) ? group.items : [])
+    : []);
+
+  const items = sourceItems.map(item => ({
+    id: normalizeCartProductId(item.id),
+    name: item.productName,
+    qty: Number(item.secondaryQuantity ?? item.quantity ?? 1),
+    price: Number(item?.price?.sales?.value ?? item?.priceTotal?.basePriceValue ?? 0)
+  }));
+
+  const total = Number(
+    payload?.cart?.totalProductsValueNumber ??
+    payload?.basket?.totals?.productsTotalPriceOnly ??
+    payload?.basket?.totals?.productsTotalPriceOnlyWithSDR ??
+    0
+  );
+
+  return {
+    customerAuthenticated,
+    items,
+    total: Number.isFinite(total) ? total : 0
+  };
+}

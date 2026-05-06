@@ -38,10 +38,73 @@ VAULT_PATH = Path(os.environ["CONTINENTE_VAULT_COOKIE_PATH"]) if "CONTINENTE_VAU
 # Tried in this order when auto-detecting
 BROWSERS = ["arc", "chrome", "edge", "brave", "firefox", "chromium", "vivaldi", "opera", "safari"]
 
+ARC_USER_DATA_DIR = Path.home() / "Library" / "Application Support" / "Arc" / "User Data"
+
+
+def score_cookies(cookies: list[dict]) -> tuple[int, int]:
+    """Prefer cookie sets that look like a logged-in storefront session."""
+    names = {cookie["name"] for cookie in cookies}
+    auth_markers = {
+        "__Host-col",
+        "CredentialsSignupScheme",
+        "dwac_99f34b6e35d78e56f04854e02c",
+        "dwsid",
+        "sid",
+    }
+    return (len(names & auth_markers), len(cookies))
+
+
+def get_arc_profile_cookie_paths() -> list[Path]:
+    if not ARC_USER_DATA_DIR.exists():
+        return []
+
+    candidates = []
+    for child in sorted(ARC_USER_DATA_DIR.iterdir()):
+        if child.is_dir() and (child.name == "Default" or child.name.startswith("Profile ")):
+            cookie_file = child / "Cookies"
+            if cookie_file.exists():
+                candidates.append(cookie_file)
+    return candidates
+
+
+def get_arc_cookies() -> tuple[list[dict], str]:
+    import browser_cookie3
+
+    best_cookies = []
+    best_label = "arc"
+    best_score = (-1, -1)
+
+    for cookie_file in get_arc_profile_cookie_paths():
+        jar = browser_cookie3.arc(cookie_file=str(cookie_file), domain_name=DOMAIN)
+        cookies = []
+        for c in jar:
+            cookies.append({
+                "domain": c.domain,
+                "name": c.name,
+                "value": c.value,
+                "path": getattr(c, "path", "/"),
+                "secure": bool(getattr(c, "secure", False)),
+                "httpOnly": c.has_nonstandard_attr("HttpOnly") if hasattr(c, "has_nonstandard_attr") else False,
+                "sameSite": "Lax",
+                "expires": getattr(c, "expires", None),
+            })
+
+        score = score_cookies(cookies)
+        if score > best_score:
+            best_cookies = cookies
+            best_label = f"arc:{cookie_file.parent.name}"
+            best_score = score
+
+    return best_cookies, best_label
+
 
 def get_browser_cookies(browser_name: str) -> list[dict]:
     """Read continente.pt cookies from the given browser."""
     import browser_cookie3
+
+    if browser_name == "arc":
+        cookies, _ = get_arc_cookies()
+        return cookies
 
     getter = getattr(browser_cookie3, browser_name, None)
     if getter is None:
@@ -79,9 +142,14 @@ def find_cookies(browser: str | None) -> tuple[list[dict], str]:
     print("Auto-detecting browser with Continente cookies...", file=sys.stderr)
     for name in BROWSERS:
         try:
-            cookies = get_browser_cookies(name)
-            if cookies:
-                return cookies, name
+            if name == "arc":
+                cookies, label = get_arc_cookies()
+                if cookies:
+                    return cookies, label
+            else:
+                cookies = get_browser_cookies(name)
+                if cookies:
+                    return cookies, name
         except Exception as e:
             print(f"  {name}: {e}", file=sys.stderr)
             continue
