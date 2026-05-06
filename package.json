@@ -1,7 +1,7 @@
 {
   "name": "continente-mcp",
-  "version": "3.1.0",
-  "description": "MCP server for Continente.pt — search products, manage your cart, and browse order history from your AI assistant.",
+  "version": "3.2.0",
+  "description": "MCP server for Continente.pt — search products, manage your cart, and browse order history.",
   "type": "module",
   "main": "src/index.js",
   "bin": {
@@ -13,7 +13,7 @@
   "scripts": {
     "start": "node src/index.js",
     "setup": "playwright install chromium --with-deps",
-    "test": "node --test"
+    "test": "node --test && python3 test/cookie_reader_test.py && python3 test/keepalive_test.py"
   },
   "keywords": [
     "mcp",
@@ -41,6 +41,7 @@
     "skills/",
     "continente-cookie-reader.py",
     "continente-keepalive.py",
+    "continente-auto-login.js",
     "continente-backup.js",
     ".env.example",
     "LICENSE",

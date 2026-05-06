@@ -28,7 +28,7 @@ const log = (...args) => console.error('[backup]', ...args);
 function loadCookies() {
   if (!existsSync(COOKIE_FILE)) {
     log(`No cookies found at ${COOKIE_FILE}`);
-    log('Run: python3 continente-cookie-reader.py');
+    log('Run: node continente-auto-login.js, or use continente-cookie-reader.py as an advanced browser-cookie fallback.');
     return null;
   }
   try {

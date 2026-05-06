@@ -1,8 +1,8 @@
 # continente-mcp
 
-Turn your AI assistant into a Continente shopping helper.
+MCP tools for Continente.pt shopping workflows.
 
-`continente-mcp` is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server for [Continente.pt](https://www.continente.pt), Portugal's largest supermarket chain. It connects Claude, Codex, Cursor, Windsurf, and other MCP clients to your Continente account so they can search the catalogue, prefer the products you already buy, inspect your basket, add items, and correct quantities for you.
+`continente-mcp` is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server for [Continente.pt](https://www.continente.pt), Portugal's largest supermarket chain. It gives MCP clients tools to search the catalogue, use your favourites and order history as context, inspect your basket, add items, and correct quantities.
 
 Instead of clicking through the website for the same groceries every week, you can ask:
 
@@ -14,7 +14,7 @@ Instead of clicking through the website for the same groceries every week, you c
 >
 > "Show me the products I order most often."
 
-Search alone isn't enough. The server feeds the assistant your favourites and order history as context, so it can usually pick the brand, size, and variant you wanted without you spelling it out.
+The server uses your favourites and order history to rank product matches, so common requests can resolve to the brands, sizes, and variants you already buy.
 
 > **⚠️ Stability note:** This server drives a headless browser against Continente's website using CSS selectors. If Continente updates their site structure, some tools may need code updates.
 
@@ -40,12 +40,12 @@ The server exposes these tools:
 
 ## Why use it
 
-- **Shop in plain language:** ask for groceries by name and let your assistant resolve the Continente product IDs.
+- **Resolve grocery requests by name:** product search is ranked against your favourites and order history.
 - **Uses your buying history:** favourites and past orders help distinguish "the milk I buy" from every other milk in the catalogue.
 - **Adds straight to your cart:** products go into your Continente basket and you check out on the website as normal.
-- **No password handling:** authentication comes from your existing browser session cookies.
+- **Automatic login from a private env file:** provide your Continente login details once, and the server refreshes its private cookie cache when needed.
 - **Works with standard MCP clients:** run it locally with `npx continente-mcp` or from a cloned repo.
-- **Agent skill included:** the bundled `groceries` skill matches items against favourites and order history before searching.
+- **Bundled groceries skill:** the included skill matches items against favourites and order history before searching.
 
 ## Quick start
 
@@ -54,9 +54,12 @@ git clone https://github.com/davidmarqu3s/continente-mcp
 cd continente-mcp
 npm install
 npm run setup
-python3 -m pip install browser-cookie3 requests
-python3 continente-cookie-reader.py
+mkdir -p ~/.continente
+cp .env.example ~/.continente/credentials.env
+chmod 600 ~/.continente/credentials.env
 ```
+
+Edit `~/.continente/credentials.env` and set `CONTINENTE_EMAIL` and `CONTINENTE_PASSWORD`. Keep this file outside your repo.
 
 Then add the server to your MCP client:
 
@@ -71,7 +74,7 @@ Then add the server to your MCP client:
 }
 ```
 
-Restart your MCP client, then ask your assistant to:
+Restart your MCP client, then use the tools:
 
 1. Run `refresh_favorites` once, so product search can rank your saved favourites.
 2. Search for a product, for example `search_products` with `leite`.
@@ -79,11 +82,11 @@ Restart your MCP client, then ask your assistant to:
 4. Correct quantities with `update_cart_item` if needed.
 5. Review the basket with `get_cart`.
 
-The detailed setup below covers local-clone config, Windows paths, keepalive, security, and troubleshooting.
+The detailed setup below covers local-clone config, Windows paths, optional keepalive, advanced browser-cookie export, security, and troubleshooting.
 
 ## Copy-paste install prompt
 
-If you use an AI coding agent such as Codex, Claude Code, Cursor, or Windsurf, you can paste this into a new session and let it do the local setup:
+If you use Codex, Claude Code, Cursor, Windsurf, or another coding tool, you can paste this into a new session for local setup:
 
 ```text
 Please install and configure continente-mcp on this machine.
@@ -96,9 +99,9 @@ Please do the following:
 2. Clone https://github.com/davidmarqu3s/continente-mcp if it is not already present.
 3. Run npm install in the repo.
 4. Install Playwright Chromium with npm run setup, or npx playwright install chromium if that is more appropriate for my OS.
-5. Install the Python cookie-reader dependencies: browser-cookie3 and requests.
-6. Ask me to log into https://www.continente.pt in my normal browser.
-7. Run continente-cookie-reader.py to export Continente cookies to ~/.continente/cookies.json.
+5. Create a private env file at ~/.continente/credentials.env with mode 600.
+6. Ask me for my Continente email and password, write them only to that private env file, and never print them.
+7. Run node continente-auto-login.js to verify login and create the private cookie cache.
 8. Add an MCP server named "continente" to my MCP client config.
    Use npx if possible:
    {
@@ -113,18 +116,19 @@ Please do the following:
 10. Verify the server by listing tools and, if possible, calling get_cart.
 
 Important:
-- Do not print cookie values, addresses, order details, tokens, or secrets.
+- Do not print login details, cookie values, addresses, order details, tokens, or secrets.
 - Do not place an order or checkout.
-- If get_cart says I am not logged in, help me refresh cookies rather than continuing with cart actions.
+- If get_cart says I am not logged in, check the private env file and automatic login before suggesting browser-cookie export.
 ```
 
 ## How it works
 
-1. You log in to Continente.pt in your normal browser.
-2. The cookie reader exports only the Continente cookies to `~/.continente/cookies.json`.
+1. You store Continente credentials in a private env file such as `~/.continente/credentials.env`.
+2. `continente-auto-login.js` logs in with Playwright and writes an authenticated cookie cache to `~/.continente/cookies.json`.
 3. Your MCP client starts `continente-mcp`.
-4. The server uses a headless Chromium session to read Continente pages and call the cart endpoint.
-5. Your assistant receives structured tools for product search, favourites, cart, and order history.
+4. The server uses the private cookie cache for normal requests.
+5. If protected pages redirect to login, the server runs automatic login again and retries the action.
+6. The MCP client receives structured tools for product search, favourites, cart, and order history.
 
 You always complete checkout on Continente.pt. This tool helps prepare the basket; it does not place orders or pay for anything.
 
@@ -133,8 +137,8 @@ You always complete checkout on Continente.pt. This tool helps prepare the baske
 ## Requirements
 
 - [Node.js](https://nodejs.org/) 18 or later
-- [Python](https://www.python.org/) 3.10+ (for the cookie export script)
-- A Continente.pt account, logged in on one of the [supported browsers](#supported-browsers)
+- [Python](https://www.python.org/) 3.10+ (for keepalive and optional browser-cookie export)
+- A Continente.pt account
 
 ---
 
@@ -142,7 +146,7 @@ You always complete checkout on Continente.pt. This tool helps prepare the baske
 
 ### 1. Clone and install
 
-The server can run from npm, but the first-time setup still needs this repository because the Python cookie scripts live here.
+The server can run from npm, but the first-time setup is easiest from a local clone because the login utility and env sample live here.
 
 ```bash
 git clone https://github.com/davidmarqu3s/continente-mcp
@@ -161,36 +165,30 @@ npm run setup
 
 Once set up, you can run the server either through `npx continente-mcp` or via the local clone — both work in your MCP client config (see [step 3](#3-configure-your-mcp-client)).
 
-### 2. Export your cookies
-
-The server authenticates using cookies from your existing browser session — no password handling, no OAuth flow. You need to be **logged into Continente.pt** in your browser first.
-
-Install the cookie reader dependencies:
+### 2. Create your private env file
 
 ```bash
-python3 -m pip install browser-cookie3 requests   # macOS / Linux
-python  -m pip install browser-cookie3 requests   # Windows
+mkdir -p ~/.continente
+cp .env.example ~/.continente/credentials.env
+chmod 600 ~/.continente/credentials.env
 ```
 
-Export your cookies:
+Edit `~/.continente/credentials.env` and set:
 
 ```bash
-python3 continente-cookie-reader.py   # macOS / Linux
-python  continente-cookie-reader.py   # Windows
-# Auto-detecting browser with Continente cookies...
-# Found 20 cookies in chrome.
-# Saved 20 cookies → ~/.continente/cookies.json  (browser: chrome)
-# On Windows: %USERPROFILE%\.continente\cookies.json
+CONTINENTE_EMAIL=you@example.com
+CONTINENTE_PASSWORD=your-password
 ```
 
-To specify a browser explicitly:
+Do not put real credentials in `.env.example`, MCP config JSON, shell history, README snippets, or any tracked file.
+
+Verify login and create the first private cookie cache:
 
 ```bash
-python3 continente-cookie-reader.py --browser firefox
-python3 continente-cookie-reader.py --list-browsers   # see all supported browsers
+node continente-auto-login.js
 ```
 
-Cookies are saved to `~/.continente/cookies.json` (`%USERPROFILE%\.continente\cookies.json` on Windows) with owner-only read permissions.
+Cookies are saved to `~/.continente/cookies.json` (`%USERPROFILE%\.continente\cookies.json` on Windows) with owner-only read permissions. They are an internal cache; the login env file is the source of recovery.
 
 ### 3. Configure your MCP client
 
@@ -239,9 +237,9 @@ Where to put this config:
 
 ---
 
-## Keeping the session alive
+## Optional Keepalive
 
-Continente sessions expire after a period of inactivity. Run the keepalive script on a schedule to prevent this:
+Keepalive is optional. Normal tool calls can now refresh expired cookies through automatic login. A scheduled keepalive is still useful if you want fewer full logins and a warm session cache.
 
 **macOS (launchd), every 20 minutes:**
 
@@ -289,17 +287,23 @@ schtasks /create /tn "ContinenteKeepalive" /tr "python C:\path\to\continente-kee
 
 Or open Task Scheduler and create a task that runs `python C:\path\to\continente-keepalive.py` every 20 minutes.
 
-If the session expires, the keepalive script will automatically re-read cookies from your browser.
+The keepalive script reads the same private env file used by `continente-auto-login.js`. If cookies expire, it tries automatic login first and uses browser-cookie export only as an advanced fallback.
+
+To use a non-default env path:
+
+```bash
+CONTINENTE_ENV_PATH=/path/to/private/credentials.env python3 continente-keepalive.py
+```
 
 ---
 
 ## Security
 
-- **Cookies give full account access** — they can view your address, manage your cart, and see your order history. Treat them like a password.
-- **macOS / Linux:** Cookies are stored at `~/.continente/cookies.json` with owner-only read permissions (`chmod 600`).
-- **Windows:** Cookies are stored at `%USERPROFILE%\.continente\cookies.json`. To restrict access: `icacls "%USERPROFILE%\.continente\cookies.json" /inheritance:r /grant:r "%USERNAME%:R"`
-- This path is excluded from git via `.gitignore`. Never commit it.
-- Cookies expire roughly every 30 days. Re-run `continente-cookie-reader.py` to refresh them.
+- **Credentials are secrets.** Keep `CONTINENTE_EMAIL` and `CONTINENTE_PASSWORD` in a private env file outside the repo, with owner-only permissions (`chmod 600` on macOS/Linux).
+- **Cookies are also secrets.** They can view your address, manage your cart, and see your order history. Treat `~/.continente/cookies.json` like a password.
+- Do not put real credentials or cookies in `.env.example`, MCP client config, README examples, logs, screenshots, issues, or commits.
+- The tools log generic login steps only. They do not print credential values or cookie values.
+- On Windows, restrict the state folder with filesystem permissions, for example: `icacls "%USERPROFILE%\.continente" /inheritance:r /grant:r "%USERNAME%:F"`
 
 ---
 
@@ -315,9 +319,17 @@ node continente-backup.js
 
 ---
 
-## Supported browsers
+## Advanced Browser-Cookie Export
 
-`continente-cookie-reader.py` can read cookies from:
+Automatic login is the recommended setup. If you cannot use it, `continente-cookie-reader.py` can export cookies from a browser where you are already logged in:
+
+```bash
+python3 -m pip install browser-cookie3 requests   # macOS / Linux
+python  -m pip install browser-cookie3 requests   # Windows
+python3 continente-cookie-reader.py
+```
+
+Supported browser sources:
 
 | Browser | macOS | Windows | Linux |
 |---------|-------|---------|-------|
@@ -331,7 +343,7 @@ node continente-backup.js
 | Opera | ✓ | ✓ | ✓ |
 | Safari | ✓ | — | — |
 
-Powered by [browser-cookie3](https://github.com/borisbabic/browser_cookie3).
+Powered by [browser-cookie3](https://github.com/borisbabic/browser_cookie3). Browser-cookie export is best treated as a recovery or advanced workflow, not the default setup.
 
 ---
 
@@ -344,8 +356,12 @@ See [`.env.example`](./.env.example) for all options. The main ones:
 | `CONTINENTE_COOKIES_PATH` | `~/.continente/cookies.json` | Where cookies are read/written |
 | `CONTINENTE_STATE_DIR` | `~/.continente` | Directory for preferences and backups |
 | `CONTINENTE_VAULT_COOKIE_PATH` | — | Optional secondary path to also write cookies to (for multi-machine sync) |
+| `CONTINENTE_ENV_PATH` | `~/.continente/credentials.env` | Private env file containing login settings |
+| `CONTINENTE_EMAIL` | — | Continente login email |
+| `CONTINENTE_PASSWORD` | — | Continente login password |
+| `CONTINENTE_LOGIN_HEADLESS` | `true` | Set to `false` only when debugging the automatic login browser |
 
-`CONTINENTE_COOKIES_PATH` is used by the Python cookie and keepalive utilities. The MCP server reads cookies from `CONTINENTE_STATE_DIR/cookies.json`, so if you customize one, make sure the server can still find the exported `cookies.json`.
+`CONTINENTE_COOKIES_PATH` is used by the login, cookie, and keepalive utilities. The MCP server reads cookies from `CONTINENTE_STATE_DIR/cookies.json`, so if you customize one, make sure the server can still find the exported `cookies.json`.
 
 > **Windows:** Replace `~` with `%USERPROFILE%` (cmd) or `$env:USERPROFILE` (PowerShell). Node.js accepts both `/` and `\` as path separators.
 
@@ -355,10 +371,10 @@ See [`.env.example`](./.env.example) for all options. The main ones:
 
 | Problem | What to try |
 |---------|-------------|
-| `Not logged in` or redirected to login | Re-run `continente-cookie-reader.py` after logging into Continente.pt in your browser. |
-| `No favorites loaded` | Ask the assistant to run `refresh_favorites` once. Search still works without favourites, but results won't be ranked by what you usually buy. |
+| `Not logged in` or redirected to login | Check that `~/.continente/credentials.env` exists, has `CONTINENTE_EMAIL` and `CONTINENTE_PASSWORD`, and is readable by your MCP server process. Then run `node continente-auto-login.js`. |
+| `No favorites loaded` | Run `refresh_favorites` once. Search still works without favourites, but results will not be ranked by what you usually buy. |
 | Playwright browser missing | Run `npm run setup` from the repo, or `npx playwright install chromium`. |
-| Cookie reader cannot find cookies | Confirm you are logged in, then try `python3 continente-cookie-reader.py --list-browsers` and rerun with `--browser chrome`, `--browser firefox`, etc. |
+| Cookie reader cannot find cookies | Browser-cookie export is advanced. Confirm you are logged in, then try `python3 continente-cookie-reader.py --list-browsers` and rerun with `--browser chrome`, `--browser firefox`, etc. |
 | Product search or cart parsing breaks | Continente may have changed its website structure. Open an issue with the failing tool, query/product, and what happened. |
 | `get_most_bought` is slow | Expected on accounts with many orders — it scans order detail pages sequentially. |
 

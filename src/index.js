@@ -7,6 +7,7 @@ import * as cheerio from 'cheerio';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'fs';
 import { normalizeCookies } from './utils.js';
 import { normalizeCartProductId, quantityForCartUpdate, summarizeCartState } from './cart-utils.js';
+import { refreshAuthCookies } from './auth-session.js';
 
 const CONTINENTE_BASE = 'https://www.continente.pt';
 const STATE_DIR = process.env.CONTINENTE_STATE_DIR || `${process.env.HOME}/.continente`;
@@ -27,8 +28,20 @@ let context = null;
 let page = null;
 let loadedCookieMtimeMs = null;
 
+async function refreshAuthSession() {
+  const refreshed = await refreshAuthCookies({
+    stateDir: STATE_DIR,
+    closeBrowser,
+    log: (message) => console.error(message),
+  });
+  return refreshed;
+}
+
 async function ensureBrowser() {
   const cookieFile = `${STATE_DIR}/cookies.json`;
+  if (!existsSync(cookieFile)) {
+    await refreshAuthSession();
+  }
   const nextCookieMtimeMs = existsSync(cookieFile) ? statSync(cookieFile).mtimeMs : null;
 
   if (context && loadedCookieMtimeMs !== nextCookieMtimeMs) {
@@ -70,6 +83,19 @@ async function goto(url, wait = 'networkidle') {
   await page.goto(url, { waitUntil: wait, timeout: 20000 });
   await page.waitForTimeout(1500);
   return page;
+}
+
+async function retryAfterAutoLogin(operation) {
+  const first = await operation();
+  if (first?.error !== 'not_authenticated') {
+    return first;
+  }
+
+  if (!(await refreshAuthSession())) {
+    return first;
+  }
+
+  return operation();
 }
 
 async function closeBrowser() {
@@ -200,9 +226,10 @@ async function updateCartItem(productId, quantity) {
 
     if (!item) return { error: 'not_found' };
 
+    const removeEl = item.querySelector('button.remove-product');
     const updateEl = item.querySelector('.ct-tile-quantity-update');
     const qtyInput = item.querySelector('input.add-to-cart-quantity');
-    if (!updateEl || !qtyInput) return { error: 'missing_quantity_controls' };
+    if ((!updateEl || !qtyInput) && !removeEl) return { error: 'missing_quantity_controls' };
 
     let measureOptions = {};
     try {
@@ -211,19 +238,54 @@ async function updateCartItem(productId, quantity) {
       measureOptions = {};
     }
 
-    const updateUrl = updateEl.dataset.action;
-    const uuid = updateEl.dataset.uuid || item.dataset.uuid;
-    if (!updateUrl || !uuid) return { error: 'missing_update_data' };
+    const updateUrl = updateEl?.dataset.action;
+    const uuid = updateEl?.dataset.uuid || item.dataset.uuid;
 
     return {
       updateUrl,
       uuid,
       measureOptions,
-      gtmIndex: item.dataset.idx || '1'
+      gtmIndex: item.dataset.idx || '1',
+      removeUrl: removeEl?.dataset.action,
+      removeUuid: removeEl?.dataset.uuid || item.dataset.uuid
     };
   }, { cartPid });
 
   if (updateData.error) return { success: false, error: updateData.error };
+
+  if (Number(quantity) <= 0) {
+    if (!updateData.removeUrl || !updateData.removeUuid) {
+      return { success: false, error: 'missing_remove_data' };
+    }
+
+    const params = new URLSearchParams({ pid: cartPid, uuid: updateData.removeUuid });
+    try {
+      const res = await context.request.get(`${CONTINENTE_BASE}${updateData.removeUrl}?${params.toString()}`, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        timeout: 10000
+      });
+      if (!res.ok()) return { success: false, status: res.status(), error: `HTTP ${res.status()}` };
+
+      await page.goto(`${CONTINENTE_BASE}/checkout/carrinho/`, { waitUntil: 'networkidle', timeout: 20000 });
+      const stillPresent = await page.evaluate(({ cartPid }) => {
+        return Array.from(document.querySelectorAll('[data-pid][data-product-name]'))
+          .some(el => el.dataset.pid === cartPid || el.querySelector(`input.add-to-cart-quantity[data-pid="${cartPid}-master"]`));
+      }, { cartPid });
+
+      if (stillPresent) return { success: false, error: 'remove_not_confirmed' };
+
+      return {
+        success: true,
+        product_id: cartPid,
+        requested_quantity: quantity,
+        cart_quantity: '0'
+      };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  if (!updateData.updateUrl || !updateData.uuid) return { success: false, error: 'missing_update_data' };
 
   const formattedQuantity = quantityForCartUpdate(quantity, updateData.measureOptions);
   const conversion = Number(updateData.measureOptions.primaryToSecondary || updateData.measureOptions.unitConversionRate);
@@ -644,9 +706,9 @@ class ContinenteServer {
   }
 
   async handle_get_cart() {
-    const cart = await getCart();
+    const cart = await retryAfterAutoLogin(() => getCart());
     if (cart?.error === 'not_authenticated') {
-      return { content: [{ type: 'text', text: 'Not logged in — cookies may have expired. Re-run the cookie sync script.' }] };
+      return { content: [{ type: 'text', text: 'Not logged in. Set CONTINENTE_EMAIL and CONTINENTE_PASSWORD in the MCP server environment, or refresh cookies manually.' }], isError: true };
     }
     if (cart?.error) {
       return { content: [{ type: 'text', text: `Could not load cart. (${cart.error})` }], isError: true };
@@ -670,7 +732,7 @@ class ContinenteServer {
   }
 
   async handle_add_to_cart(productId, quantity) {
-    const result = await addToCart(productId, quantity);
+    const result = await retryAfterAutoLogin(() => addToCart(productId, quantity));
     if (result.success) {
       return { content: [{ type: 'text', text: `✅ Added to cart! (${quantity}x)\n\nUse get_cart to review.` }] };
     }
@@ -678,9 +740,9 @@ class ContinenteServer {
   }
 
   async handle_update_cart_item(productId, quantity) {
-    const result = await updateCartItem(productId, quantity);
+    const result = await retryAfterAutoLogin(() => updateCartItem(productId, quantity));
     if (result?.error === 'not_authenticated') {
-      return { content: [{ type: 'text', text: 'Not logged in — cookies may have expired. Re-sync your cookies.' }], isError: true };
+      return { content: [{ type: 'text', text: 'Not logged in. Set CONTINENTE_EMAIL and CONTINENTE_PASSWORD in the MCP server environment, or refresh cookies manually.' }], isError: true };
     }
     if (result?.error === 'not_found') {
       return { content: [{ type: 'text', text: `Product ${productId} is not in the cart.` }], isError: true };
@@ -692,9 +754,9 @@ class ContinenteServer {
   }
 
   async handle_order_history(limit) {
-    const orders = await getOrderHistory(limit);
+    const orders = await retryAfterAutoLogin(() => getOrderHistory(limit));
     if (orders?.error === 'not_authenticated') {
-      return { content: [{ type: 'text', text: 'Not logged in — cookies may have expired. Re-sync your cookies.' }] };
+      return { content: [{ type: 'text', text: 'Not logged in. Set CONTINENTE_EMAIL and CONTINENTE_PASSWORD in the MCP server environment, or refresh cookies manually.' }], isError: true };
     }
     if (!Array.isArray(orders) || orders.length === 0) {
       return { content: [{ type: 'text', text: 'Could not load order history. Check https://www.continente.pt/conta/encomendas/' }] };
@@ -715,9 +777,9 @@ class ContinenteServer {
   }
 
   async handle_most_bought(limit) {
-    const result = await getMostBought(limit);
+    const result = await retryAfterAutoLogin(() => getMostBought(limit));
     if (result.error) {
-      return { content: [{ type: 'text', text: result.error === 'not_authenticated' ? 'Not logged in — cookies may have expired.' : `Error: ${result.error}` }] };
+      return { content: [{ type: 'text', text: result.error === 'not_authenticated' ? 'Not logged in. Set CONTINENTE_EMAIL and CONTINENTE_PASSWORD in the MCP server environment, or refresh cookies manually.' : `Error: ${result.error}` }], isError: true };
     }
     if (!Array.isArray(result) || result.length === 0) {
       return { content: [{ type: 'text', text: 'Could not calculate most bought items from order history.' }] };

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-continente-cookie-reader — export Continente.pt cookies from your browser.
+continente-cookie-reader — advanced browser-cookie export for Continente.pt.
 
 Reads browser cookies for continente.pt and writes them to ~/.continente/cookies.json
-so the MCP server can use them. Auto-detects your browser or let you specify one.
+so the MCP server can use them. Automatic env-file login is the recommended setup;
+use this script when you explicitly want to reuse an existing browser session.
 
 Usage:
   python3 continente-cookie-reader.py                    # auto-detect
