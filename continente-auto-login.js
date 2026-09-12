@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
+import { homedir } from 'os';
+import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 
 const CONTINENTE_LOGIN_URL = 'https://www.continente.pt/login/';
@@ -46,8 +48,9 @@ function parseEnvFile(contents) {
 }
 
 export function credentialEnvPath(env = DEFAULT_ENV) {
-  const home = env.HOME || (env === DEFAULT_ENV ? DEFAULT_ENV.HOME : undefined);
-  return env.CONTINENTE_ENV_PATH || (home ? `${home}/.continente/credentials.env` : null);
+  const home = env.HOME || env.USERPROFILE || (env === DEFAULT_ENV ? homedir() : null);
+  const stateDir = env.CONTINENTE_STATE_DIR || (home ? join(home, '.continente') : null);
+  return env.CONTINENTE_ENV_PATH || (stateDir ? join(stateDir, 'credentials.env') : null);
 }
 
 export function loadCredentialEnv(env = DEFAULT_ENV) {
@@ -55,11 +58,13 @@ export function loadCredentialEnv(env = DEFAULT_ENV) {
   if (!file || !existsSync(file)) {
     return { ...env };
   }
-  return { ...parseEnvFile(readFileSync(file, 'utf8')), ...env };
+  return { ...parseEnvFile(readFileSync(file, 'utf8')), ...env, CONTINENTE_ENV_PATH: file };
 }
 
-function cookiePathForEnv(env) {
-  return env.CONTINENTE_COOKIES_PATH || `${env.HOME || DEFAULT_ENV.HOME}/.continente/cookies.json`;
+export function resolveStatePaths(env = DEFAULT_ENV) {
+  const settings = loadCredentialEnv(env);
+  const stateDir = settings.CONTINENTE_STATE_DIR || join(settings.HOME || settings.USERPROFILE || homedir(), '.continente');
+  return { stateDir, cookieFile: settings.CONTINENTE_COOKIES_PATH || join(stateDir, 'cookies.json') };
 }
 
 function syncVault(cookies, vaultCookiePath, logger) {
@@ -82,10 +87,16 @@ export function getCredentialStatus(env = DEFAULT_ENV) {
   };
 }
 
-async function isLoggedIn(page) {
-  await page.goto(CONTINENTE_CHECK_URL, { waitUntil: 'domcontentloaded', timeout: 20000 });
-  await page.waitForTimeout(1000);
-  return !page.url().includes('/login');
+export async function isLoggedIn(page) {
+  const response = await page.goto(CONTINENTE_CHECK_URL, { waitUntil: 'domcontentloaded', timeout: 20000 });
+  if (!response?.ok() || page.url().includes('/login')) return false;
+  const session = await page.context().request.get(
+    'https://www.continente.pt/on/demandware.store/Sites-continente-Site/default/Cart-MiniCartShow',
+    { headers: { 'X-Requested-With': 'XMLHttpRequest' }, timeout: 10000 }
+  );
+  if (!session.ok()) return false;
+  const payload = await session.json().catch(() => null);
+  return payload?.resources?.customerAuthenticated === true;
 }
 
 async function fillFirst(page, selectors, value, label) {
@@ -200,7 +211,7 @@ export async function autoLogin({
     }
 
     const cookies = await context.cookies();
-    writeCookies(cookiePathForEnv(mergedEnv), cookies);
+    writeCookies(resolveStatePaths(mergedEnv).cookieFile, cookies);
     syncVault(cookies, mergedEnv.CONTINENTE_VAULT_COOKIE_PATH, logger);
     logger(`Saved ${cookies.length} cookies.`);
     return { success: true, cookies: cookies.length };
@@ -209,7 +220,7 @@ export async function autoLogin({
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   autoLogin().then((result) => {
     if (!result.success) {
       process.exit(1);
