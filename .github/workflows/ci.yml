@@ -32,6 +32,11 @@ jobs:
       - run: npm test
       - run: npm run check:release
       - run: npm pack --dry-run
-      - run: npx playwright install --with-deps chromium
+      - name: Install Chromium and Linux dependencies
+        if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+      - name: Install Chromium
+        if: runner.os != 'Linux'
+        run: npx playwright install chromium
       - name: Verify browser runtime
         run: node --input-type=module -e "import { chromium } from 'playwright'; const browser = await chromium.launch(); try { const page = await browser.newPage(); await page.setContent('<h1>Ready</h1>'); if (await page.locator('h1').textContent() !== 'Ready') throw new Error('Browser failed'); } finally { await browser.close(); }"
