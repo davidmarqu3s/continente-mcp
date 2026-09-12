@@ -1,10 +1,8 @@
 import { existsSync } from 'fs';
 
-import { autoLogin, getCredentialStatus } from '../continente-auto-login.js';
+import { autoLogin, getCredentialStatus, loadCredentialEnv, resolveStatePaths } from '../continente-auto-login.js';
 
-export function cookieFileForStateDir(stateDir) {
-  return `${stateDir}/cookies.json`;
-}
+export { resolveStatePaths };
 
 export function canAutoLogin(env = process.env) {
   return getCredentialStatus(env).ready;
@@ -21,10 +19,10 @@ export async function refreshAuthCookies({
     return false;
   }
 
-  const loginEnv = {
-    CONTINENTE_COOKIES_PATH: cookieFileForStateDir(stateDir),
-    ...env,
-  };
+  const loginEnv = loadCredentialEnv(env);
+  if (stateDir) loginEnv.CONTINENTE_STATE_DIR = stateDir;
+  const { cookieFile } = resolveStatePaths(loginEnv);
+  loginEnv.CONTINENTE_COOKIES_PATH = cookieFile;
 
   if (closeBrowser) {
     await closeBrowser();
@@ -35,5 +33,5 @@ export async function refreshAuthCookies({
     log: (message) => log(`[auth] ${message}`),
   });
 
-  return Boolean(result.success && existsSync(cookieFileForStateDir(stateDir)));
+  return Boolean(result.success && existsSync(cookieFile));
 }

@@ -81,3 +81,26 @@ test('summarizes minicart payloads into a consistent cart state', () => {
     }
   ]);
 });
+
+test('unknown payload is not an empty basket', () => {
+  assert.equal(summarizeCartState({basket: {}, resources:{customerAuthenticated:true}}).error, 'cart_shape_unknown');
+  assert.equal(summarizeCartState(null).error, 'cart_shape_unknown');
+});
+
+test('only an explicit item collection confirms an empty basket', () => {
+  const state = summarizeCartState({basket:{itemsSortedByBrand:[]},resources:{customerAuthenticated:true}});
+  assert.equal(state.error, undefined);
+  assert.deepEqual(state.items, []);
+});
+
+test('malformed basket groups and items are not silently dropped', () => {
+  for (const basket of [{itemsSortedByBrand:[{}]}, {itemsSortedByBrand:[{items:[{}]}]}]) {
+    assert.equal(summarizeCartState({basket,resources:{customerAuthenticated:true}}).error,'cart_shape_unknown');
+  }
+});
+
+test('unknown monetary amounts are not reported as free products', () => {
+  const state = summarizeCartState({cart:{items:[{id:'123',productName:'Milk',quantity:2}]},resources:{customerAuthenticated:true}});
+  assert.equal(state.items[0].price, null);
+  assert.equal(state.total, null);
+});

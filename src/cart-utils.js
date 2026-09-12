@@ -24,33 +24,46 @@ export function quantityForCartUpdate(displayQuantity, measureOptions = {}) {
 }
 
 export function summarizeCartState(payload = {}) {
-  const customerAuthenticated = Boolean(payload?.resources?.customerAuthenticated);
+  const customerAuthenticated = payload?.resources?.customerAuthenticated === true;
   const addItems = Array.isArray(payload?.cart?.items) ? payload.cart.items : null;
   const miniCartGroups = Array.isArray(payload?.basket?.itemsSortedByBrand)
     ? payload.basket.itemsSortedByBrand
     : null;
 
+  const unknown = { customerAuthenticated, error: 'cart_shape_unknown' };
+  if (!addItems && !miniCartGroups) return unknown;
+  if (!addItems && miniCartGroups.some(group => !Array.isArray(group?.items))) return unknown;
+
   const sourceItems = addItems || (miniCartGroups
     ? miniCartGroups.flatMap(group => Array.isArray(group?.items) ? group.items : [])
     : []);
+
+  if (sourceItems.some(item => !item?.id || !item.productName ||
+    !Number.isFinite(Number(item.secondaryQuantity ?? item.quantity)) ||
+    Number(item.secondaryQuantity ?? item.quantity) < 0)) return unknown;
 
   const items = sourceItems.map(item => ({
     id: normalizeCartProductId(item.id),
     name: item.productName,
     qty: Number(item.secondaryQuantity ?? item.quantity ?? 1),
-    price: Number(item?.price?.sales?.value ?? item?.priceTotal?.basePriceValue ?? 0)
+    price: moneyOrNull(item?.price?.sales?.value ?? item?.priceTotal?.basePriceValue)
   }));
 
-  const total = Number(
+  const total = moneyOrNull(
     payload?.cart?.totalProductsValueNumber ??
     payload?.basket?.totals?.productsTotalPriceOnly ??
-    payload?.basket?.totals?.productsTotalPriceOnlyWithSDR ??
-    0
+    payload?.basket?.totals?.productsTotalPriceOnlyWithSDR
   );
 
   return {
     customerAuthenticated,
     items,
-    total: Number.isFinite(total) ? total : 0
+    total
   };
+}
+
+function moneyOrNull(value) {
+  if (value == null || value === '') return null;
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
 }
