@@ -87,7 +87,7 @@ test('unknown payload is not an empty basket', () => {
   assert.equal(summarizeCartState(null).error, 'cart_shape_unknown');
 });
 
-test('only an explicit item collection confirms an empty basket', () => {
+test('an explicit empty item collection confirms an empty basket', () => {
   const state = summarizeCartState({basket:{itemsSortedByBrand:[]},resources:{customerAuthenticated:true}});
   assert.equal(state.error, undefined);
   assert.deepEqual(state.items, []);
@@ -103,4 +103,14 @@ test('unknown monetary amounts are not reported as free products', () => {
   const state = summarizeCartState({cart:{items:[{id:'123',productName:'Milk',quantity:2}]},resources:{customerAuthenticated:true}});
   assert.equal(state.items[0].price, null);
   assert.equal(state.total, null);
+});
+
+test('native MiniCartShow empty-basket sentinel is a valid authenticated empty cart', () => {
+  assert.deepEqual(summarizeCartState({action:'Cart-MiniCartShow',basket:{},resources:{customerAuthenticated:true}}), {
+    customerAuthenticated:true, items:[], total:0
+  });
+});
+
+test('unexpected nonempty basket objects remain errors even on MiniCartShow', () => {
+  assert.equal(summarizeCartState({action:'Cart-MiniCartShow',basket:{unexpected:true},resources:{customerAuthenticated:true}}).error,'cart_shape_unknown');
 });

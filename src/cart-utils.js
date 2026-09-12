@@ -25,6 +25,13 @@ export function quantityForCartUpdate(displayQuantity, measureOptions = {}) {
 
 export function summarizeCartState(payload = {}) {
   const customerAuthenticated = payload?.resources?.customerAuthenticated === true;
+  // The storefront uses {} when this session has not created a basket yet.
+  // Require the known response envelope; arbitrary/malformed objects still fail.
+  if (payload?.action === 'Cart-MiniCartShow' && payload.basket &&
+    typeof payload.basket === 'object' && !Array.isArray(payload.basket) &&
+    Object.keys(payload.basket).length === 0) {
+    return { customerAuthenticated, items: [], total: 0 };
+  }
   const addItems = Array.isArray(payload?.cart?.items) ? payload.cart.items : null;
   const miniCartGroups = Array.isArray(payload?.basket?.itemsSortedByBrand)
     ? payload.basket.itemsSortedByBrand

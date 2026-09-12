@@ -324,7 +324,8 @@ async function addToCart(productId, quantity = 1) {
   const before = await getCart();
   if (before.error) return { success: false, error: before.error };
   const slug = productId.endsWith('.html') ? productId : `${productId}.html`;
-  await goto(`${CONTINENTE_BASE}/produto/${slug}`);
+  await goto(`${CONTINENTE_BASE}/produto/${slug}`, 'domcontentloaded');
+  await page.waitForSelector('input.add-to-cart-url', { state: 'attached', timeout: 10000 });
 
   // Extract numeric PID and Cart-AddProduct URL from page
   const result = await page.evaluate(async (qty) => {

@@ -28,6 +28,7 @@ test('server handler contracts', async (t) => {
   let redirectToLogin = false;
   let httpStatus = 200;
   let contentFromUrl = false;
+  let backgroundRequests = false;
   let browserOperations = 0;
   let navigations = 0;
   let mutations = 0;
@@ -45,7 +46,8 @@ test('server handler contracts', async (t) => {
     }] }] },
   });
   const page = {
-    async goto(url) {
+    async goto(url, options) {
+      if (backgroundRequests && options?.waitUntil === 'networkidle') throw new Error('Background requests never became idle');
       browserOperations++;
       navigations++;
       currentUrl = redirectToLogin ? 'https://www.continente.pt/login/' : url;
@@ -53,6 +55,7 @@ test('server handler contracts', async (t) => {
       return { ok: () => httpStatus < 400, status: () => httpStatus };
     },
     async waitForTimeout() {},
+    async waitForSelector(selector) { assert.equal(selector, 'input.add-to-cart-url'); },
     async content() {
       if (!contentFromUrl) return html;
       const query = new URL(currentUrl).searchParams.get('q');
@@ -109,6 +112,15 @@ test('server handler contracts', async (t) => {
       const result = await server.handle_get_cart();
       assert.equal(result.isError, true);
       assert.match(result.content[0].text, /not logged in|not authenticated/i);
+    });
+
+    await t.test('native no-basket response is empty only for an authenticated account', async () => {
+      for (const authenticated of [true, false]) {
+        payload = { action: 'Cart-MiniCartShow', resources: { customerAuthenticated: authenticated }, basket: {} };
+        const result = await server.callTool('get_cart');
+        assert.equal(Boolean(result.isError), !authenticated);
+        if (authenticated) assert.match(result.content[0].text, /cart is empty/i);
+      }
     });
 
     await t.test('explicit authenticated empty basket is a successful empty cart', async () => {
@@ -213,6 +225,17 @@ test('server handler contracts', async (t) => {
         assert.notEqual(result.isError, true, JSON.stringify(result));
         assert.equal(mutations, before + 1);
       }
+    });
+
+    await t.test('adding a product does not wait for background requests to become idle', async () => {
+      payload = { action: 'Cart-MiniCartShow', basket: {}, resources: { customerAuthenticated: true } };
+      postMutationCart = cartWithQuantity(1);
+      mutationPayload = {};
+      backgroundRequests = true;
+      try {
+        const result = await server.callTool('add_to_cart', { product_id: 'milk-1234567', quantity: 1 });
+        assert.notEqual(result.isError, true, JSON.stringify(result));
+      } finally { backgroundRequests = false; }
     });
 
     await t.test('add confirms the quantity increase instead of mere product presence', async () => {

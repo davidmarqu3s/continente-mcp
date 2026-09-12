@@ -18,9 +18,11 @@ Release candidate; not yet a stable release.
 - Missing prices remain unknown; malformed-cookie diagnostics do not expose cookie values.
 - Compatible dependency updates resolve the audit findings; duplicate setup documentation and obsolete development artifacts removed.
 
-### Known limitation
+### Live basket verification
 
-On 12 September 2026, the account used for live verification received HTTP 500 from Continente's basket page even after fresh login. The authenticated minicart returned an unrecognised basket shape. Search, favourites and order-history tools worked. Basket writes are covered by controlled tests but have not been verified live. This candidate must not be promoted to stable until that limitation is resolved and live quantities are verified.
+On 12 September 2026, the native signed-in website confirmed that `Cart-MiniCartShow` with `basket: {}` represents a session without a basket yet. The stricter audit check had mistakenly rejected that valid empty state. The parser now recognises that exact response while still rejecting guests and malformed responses.
+
+The MCP was verified live through empty → add one product → read quantity one → update to two → remove → empty. The test product was removed; no order was placed. Adding also now waits for the product form rather than for background network traffic to become idle. This verification covers an ordinary unit product; it does not certify every weighted product variant.
 
 ### Release process
 
