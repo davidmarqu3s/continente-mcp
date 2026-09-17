@@ -128,6 +128,7 @@ test('server handler contracts', async (t) => {
       const result = await server.handle_get_cart();
       assert.notEqual(result.isError, true);
       assert.match(result.content[0].text, /cart is empty/i);
+      assert.deepEqual(result.structuredContent, { customerAuthenticated: true, items: [], total: null });
     });
 
     await t.test('missing monetary fields remain unavailable instead of displaying zero', async () => {
@@ -223,6 +224,7 @@ test('server handler contracts', async (t) => {
         const before = mutations;
         const result = await server.callTool('update_cart_item', { product_id: 'milk-1234567', quantity });
         assert.notEqual(result.isError, true, JSON.stringify(result));
+        assert.equal(result.structuredContent.success, true);
         assert.equal(mutations, before + 1);
       }
     });

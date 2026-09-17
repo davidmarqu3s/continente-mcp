@@ -2,7 +2,7 @@
 
 `package.json` is the version source. `npm version` updates it and the lockfile together; the running MCP reads that version. Git tags use `v` plus the exact version. Published versions/tags are never reused or rewritten.
 
-The existing npm/GitHub release is 3.1.0. Source version 3.2.0 was never published. The current cleanup is a breaking change and is prepared as 4.0.0-rc.1. Keep it on the `next` channel during release review. The ordinary-product live basket roundtrip now passes; details are in the changelog.
+The published npm/GitHub release is 4.0.0. Source version 3.2.0 was never published. The current follow-up is unreleased and should receive a new semantic version after review; do not reuse the 4.0.0 tag. The ordinary-product live basket roundtrip passed in 4.0.0; details are in the changelog.
 
 ## One-time npm setup
 

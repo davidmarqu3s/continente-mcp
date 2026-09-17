@@ -16,9 +16,15 @@ export function quantityForCartUpdate(displayQuantity, measureOptions = {}) {
     throw new Error('Quantity must be a non-negative number');
   }
 
-  const conversion = Number(measureOptions.primaryToSecondary || measureOptions.unitConversionRate);
+  const conversion = Number(measureOptions.primaryToSecondary ?? measureOptions.unitConversionRate);
   const hasAlternativeUnit = measureOptions.hasAlternativeSaleUnit || measureOptions.hasConversionRate;
-  const cartQuantity = hasAlternativeUnit && conversion > 0 ? quantity * conversion : quantity;
+  if ((hasAlternativeUnit && (!Number.isFinite(conversion) || conversion <= 0)) ||
+    (!hasAlternativeUnit && measureOptions.primaryunit && measureOptions.secondaryunit &&
+      measureOptions.primaryunit !== measureOptions.secondaryunit)) {
+    throw new Error('quantity_semantics_unknown');
+  }
+  const cartQuantity = hasAlternativeUnit ? quantity * conversion : quantity;
+  if (!Number.isFinite(cartQuantity)) throw new Error('quantity_semantics_unknown');
 
   return Number(cartQuantity.toFixed(3)).toString();
 }

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added a shared reliability boundary for strict tool-input validation, serialized browser operations, controlled pre-write authentication retry, structured search/cart/mutation results, and explicit write-attempt state.
+- Weighted cart updates now reject incomplete or contradictory unit-conversion metadata instead of guessing.
+
 ## 4.0.0
 
 Stable release.
