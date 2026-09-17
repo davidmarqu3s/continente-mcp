@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { summarizeCartState } from '../src/cart-utils.js';
+import { quantityForCartUpdate, summarizeCartState } from '../src/cart-utils.js';
 
 test('summarizes add-to-cart payloads into a consistent cart state', () => {
   const state = summarizeCartState({
@@ -113,4 +113,9 @@ test('native MiniCartShow empty-basket sentinel is a valid authenticated empty c
 
 test('unexpected nonempty basket objects remain errors even on MiniCartShow', () => {
   assert.equal(summarizeCartState({action:'Cart-MiniCartShow',basket:{unexpected:true},resources:{customerAuthenticated:true}}).error,'cart_shape_unknown');
+});
+
+test('weighted cart updates reject incomplete conversion metadata', () => {
+  assert.throws(() => quantityForCartUpdate(1, { hasAlternativeSaleUnit: true }), /quantity_semantics_unknown/);
+  assert.throws(() => quantityForCartUpdate(1, { primaryunit: 'kg', secondaryunit: 'un' }), /quantity_semantics_unknown/);
 });

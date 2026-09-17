@@ -9,6 +9,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'fs
 import { normalizeCookies } from './utils.js';
 import { normalizeCartProductId, quantityForCartUpdate, summarizeCartState } from './cart-utils.js';
 import { refreshAuthCookies, resolveStatePaths } from './auth-session.js';
+import { createQueue, normalizeFavoriteId, retryAuthentication, validateToolInput } from './reliability.js';
 
 const CONTINENTE_BASE = 'https://www.continente.pt';
 const { stateDir: STATE_DIR, cookieFile: COOKIE_FILE } = resolveStatePaths();
@@ -88,17 +89,8 @@ async function goto(url, wait = 'networkidle') {
   return page;
 }
 
-async function retryAfterAutoLogin(operation) {
-  const first = await operation();
-  if (first?.error !== 'not_authenticated') {
-    return first;
-  }
-
-  if (!(await refreshAuthSession())) {
-    return first;
-  }
-
-  return operation();
+async function retryAfterAutoLogin(operation, mutation = false) {
+  return retryAuthentication(operation, refreshAuthSession, mutation);
 }
 
 async function closeBrowser() {
@@ -112,7 +104,7 @@ async function closeBrowser() {
 
 async function fetchFavorites() {
   await goto(`${CONTINENTE_BASE}/conta/lista-produtos/?list=favorites`);
-  if (page.url().includes('/login')) return { error: 'not_authenticated' };
+  if (page.url().includes('/login')) return { error: 'not_authenticated', writeAttempted: false };
   const html = await page.content();
   const $ = cheerio.load(html);
   const products = [];
@@ -123,7 +115,7 @@ async function fetchFavorites() {
     const href = $el.attr('href') || '';
     if (text.length > 5 && href) {
       const idMatch = href.match(/\/produto\/([^\/\?]+)/);
-      const productId = idMatch ? idMatch[1] : null;
+      const productId = idMatch ? normalizeFavoriteId(idMatch[1]) : null;
       const priceMatch = text.match(/(\d+[,.]\d+€)/);
       const name = text.replace(/\d+[,.]\d+€/g, '').trim().substring(0, 120);
       if (name && name.length > 3 && productId) {
@@ -222,10 +214,10 @@ async function getCart() {
 
 async function updateCartItem(productId, quantity) {
   const before = await getCart();
-  if (before.error) return { success: false, error: before.error };
+  if (before.error) return { success: false, error: before.error, writeAttempted: false };
   await goto(`${CONTINENTE_BASE}/checkout/carrinho/`);
 
-  if (page.url().includes('/login')) return { error: 'not_authenticated' };
+  if (page.url().includes('/login')) return { error: 'not_authenticated', writeAttempted: false };
 
   const cartPid = normalizeCartProductId(productId);
   const updateData = await page.evaluate(({ cartPid }) => {
@@ -268,7 +260,7 @@ async function updateCartItem(productId, quantity) {
 
     const params = new URLSearchParams({ pid: cartPid, uuid: updateData.removeUuid });
     const result = await requestCartChange(updateData.removeUrl, params);
-    if (result.error) return { success: false, error: result.error };
+    if (result.error) return { success: false, error: result.error, writeAttempted: true };
     return verifyCartQuantity(cartPid, 0);
   }
 
@@ -293,7 +285,7 @@ async function updateCartItem(productId, quantity) {
   });
 
   const result = await requestCartChange(updateData.updateUrl, params);
-  if (result.error) return { success: false, error: result.error };
+  if (result.error) return { success: false, error: result.error, writeAttempted: true };
   return verifyCartQuantity(cartPid, quantity);
 }
 
@@ -315,14 +307,14 @@ async function verifyCartQuantity(productId, expectedQuantity) {
   const actual = cart.items?.find(item => item.id === productId)?.qty ?? 0;
   if (cart.error || Math.abs(actual - expectedQuantity) > 0.0005) {
     // A write may have happened. Never automatically repeat it after this point.
-    return { success: false, error: 'cart_quantity_not_confirmed' };
+    return { success: false, error: 'cart_quantity_not_confirmed', writeAttempted: true };
   }
   return { success: true, product_id: productId, cart_quantity: actual };
 }
 
 async function addToCart(productId, quantity = 1) {
   const before = await getCart();
-  if (before.error) return { success: false, error: before.error };
+  if (before.error) return { success: false, error: before.error, writeAttempted: false };
   const slug = productId.endsWith('.html') ? productId : `${productId}.html`;
   await goto(`${CONTINENTE_BASE}/produto/${slug}`, 'domcontentloaded');
   await page.waitForSelector('input.add-to-cart-url', { state: 'attached', timeout: 10000 });
@@ -358,7 +350,7 @@ async function addToCart(productId, quantity = 1) {
   }, quantity);
 
   if (!result.success || result.payload?.error || result.payload?.resources?.customerAuthenticated === false) {
-    return { success: false, error: 'cart_add_not_confirmed' };
+    return { success: false, error: 'cart_add_not_confirmed', writeAttempted: true };
   }
   const numericPid = normalizeCartProductId(productId);
   const previousQuantity = before.items.find(item => item.id === numericPid)?.qty ?? 0;
@@ -370,7 +362,7 @@ async function addToCart(productId, quantity = 1) {
 async function getOrderHistory(limit = 5) {
   await goto(`${CONTINENTE_BASE}/conta/encomendas/`);
 
-  if (page.url().includes('/login')) return { error: 'not_authenticated' };
+  if (page.url().includes('/login')) return { error: 'not_authenticated', writeAttempted: false };
 
   const text = await page.evaluate(() => document.body.innerText);
   const rawLines = text.split('\n').map(l => l.trim()).filter(Boolean);
@@ -526,7 +518,7 @@ export class ContinenteServer {
       { capabilities: { tools: {} } }
     );
     this.server.onclose = () => { void closeBrowser(); };
-    this.pending = Promise.resolve();
+    this.pending = createQueue();
     this.setupTools();
   }
 
@@ -618,22 +610,12 @@ export class ContinenteServer {
 
   callTool(name, args = {}) {
     // All tools share one browser page, including close_session.
-    const result = this.pending.then(() => this.executeTool(name, args));
-    this.pending = result.catch(() => {});
-    return result;
+    return this.pending(() => this.executeTool(name, args));
   }
 
   async executeTool(name, args) {
       try {
-        if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Arguments must be an object');
-        if (['search_products', 'get_order_history', 'get_most_bought'].includes(name) && args.limit !== undefined &&
-          (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > 50)) throw new Error('limit must be an integer from 1 to 50');
-        if (name === 'search_products' && (typeof args.query !== 'string' || !args.query.trim())) throw new Error('query must be a non-empty string');
-        if (['add_to_cart', 'update_cart_item'].includes(name)) {
-          if (typeof args.product_id !== 'string' || !/^[a-zA-Z0-9_-]+(?:\.html)?$/.test(args.product_id)) throw new Error('Invalid product_id');
-          const quantity = args.quantity ?? (name === 'add_to_cart' ? 1 : undefined);
-          if (typeof quantity !== 'number' || !Number.isFinite(quantity) || quantity < 0 || (name === 'add_to_cart' && quantity === 0)) throw new Error('Invalid quantity');
-        }
+        args = validateToolInput(name, args);
         switch (name) {
           case 'search_products':
             return await this.handle_search(args.query, args.limit || 10);
@@ -679,6 +661,7 @@ export class ContinenteServer {
 
     const favCount = prefs?.favorites?.length || 0;
     return {
+      structuredContent: { products: top },
       content: [{
         type: 'text',
         text: `Found ${products.length} products for "${query}" (${favCount} favorites loaded)${top.some(p => p.score > 0) ? ' — ⭐ = in your favorites' : ''}:\n\n${this.formatProducts(top, prefs)}\n\nUse add_to_cart with the product_id.`
@@ -723,7 +706,7 @@ export class ContinenteServer {
       return { content: [{ type: 'text', text: `Could not load cart. (${cart.error})` }], isError: true };
     }
     if (!Array.isArray(cart.items) || cart.items.length === 0) {
-      return { content: [{ type: 'text', text: '🛒 Cart is empty.' }] };
+      return { structuredContent: cart, content: [{ type: 'text', text: '🛒 Cart is empty.' }] };
     }
     const total = cart.total;
     const totalText = total === null ? 'Unavailable' : `${total.toFixed(2)}€`;
@@ -731,6 +714,7 @@ export class ContinenteServer {
       `${i + 1}. ${item.name}\n   Qtd: ${item.qty} × ${item.price?.toFixed(2) || '?'}€\n   🆔 ${item.id}`
     ).join('\n');
     return {
+      structuredContent: cart,
       content: [{
         type: 'text',
         text: `🛒 Cart (${cart.items.length} items):\n\n${list}\n\n💶 Total: ${totalText}\n\nGo to https://www.continente.pt/checkout/carrinho/ to checkout.`
@@ -739,15 +723,15 @@ export class ContinenteServer {
   }
 
   async handle_add_to_cart(productId, quantity) {
-    const result = await retryAfterAutoLogin(() => addToCart(productId, quantity));
+    const result = await retryAfterAutoLogin(() => addToCart(productId, quantity), true);
     if (result.success) {
-      return { content: [{ type: 'text', text: `✅ Added to cart! (${quantity}x)\n\nUse get_cart to review.` }] };
+      return { structuredContent: result, content: [{ type: 'text', text: `✅ Added to cart! (${quantity}x)\n\nUse get_cart to review.` }] };
     }
     return { content: [{ type: 'text', text: `⚠️ ${result.error || result.message || 'Could not add to cart.'}` }], isError: true };
   }
 
   async handle_update_cart_item(productId, quantity) {
-    const result = await retryAfterAutoLogin(() => updateCartItem(productId, quantity));
+    const result = await retryAfterAutoLogin(() => updateCartItem(productId, quantity), true);
     if (result?.error === 'not_authenticated') {
       return { content: [{ type: 'text', text: 'Not logged in. Set CONTINENTE_EMAIL and CONTINENTE_PASSWORD in the MCP server environment, or refresh cookies manually.' }], isError: true };
     }
@@ -755,7 +739,7 @@ export class ContinenteServer {
       return { content: [{ type: 'text', text: `Product ${productId} is not in the cart.` }], isError: true };
     }
     if (result.success) {
-      return { content: [{ type: 'text', text: `✅ Updated cart item ${productId} to ${quantity}.\n\nUse get_cart to review.` }] };
+      return { structuredContent: result, content: [{ type: 'text', text: `✅ Updated cart item ${productId} to ${quantity}.\n\nUse get_cart to review.` }] };
     }
     return { content: [{ type: 'text', text: `⚠️ ${result.error || 'Could not update cart item.'}` }], isError: true };
   }
