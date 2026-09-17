@@ -1,8 +1,8 @@
 # Changelog
 
-## 4.0.0-rc.1
+## 4.0.0
 
-Release candidate; not yet a stable release.
+Stable release.
 
 ### Breaking changes
 
@@ -26,7 +26,7 @@ The MCP was verified live through empty → add one product → read quantity on
 
 ### Release process
 
-One manifest version, matching lockfile and Git tag; cross-platform checks; npm publishing followed by a matching GitHub release. Prereleases use npm's `next` channel.
+One manifest version, matching lockfile and Git tag; cross-platform checks; npm publishing followed by a matching GitHub release. Stable releases use npm's `latest` channel.
 
 ## 3.1.0
 
