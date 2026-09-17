@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+  publish:
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm ci
+      - name: Check version, tag and release notes
+        id: release
+        run: npm run check:release -- "$GITHUB_REF_NAME"
+      - run: npm pack --json > package-info.json
+      - name: Publish the checked package to npm
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          DIST_TAG: ${{ steps.release.outputs.dist-tag }}
+        run: |
+          if npm view "continente-mcp@$VERSION" dist.integrity --json > registry.json; then
+            # Allow a retry after npm succeeded but GitHub release creation failed.
+            node --input-type=module -e "import fs from 'node:fs'; const packed = JSON.parse(fs.readFileSync('package-info.json'))[0]; const existing = JSON.parse(fs.readFileSync('registry.json')); if (existing !== packed.integrity) throw new Error('This version already exists with different contents');"
+          else
+            # Authentication/network failures must not be mistaken for a new version.
+            node --input-type=module -e "import fs from 'node:fs'; const result = JSON.parse(fs.readFileSync('registry.json')); if (result.error?.code !== 'E404') throw new Error('Could not check the npm registry');"
+            npm publish "continente-mcp-$VERSION.tgz" --access public --tag "$DIST_TAG"
+          fi
+      - name: Create matching GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIST_TAG: ${{ steps.release.outputs.dist-tag }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            exit 0
+          fi
+          if [ "$DIST_TAG" = next ]; then
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file release-notes.md --prerelease --latest=false
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file release-notes.md --latest
+          fi

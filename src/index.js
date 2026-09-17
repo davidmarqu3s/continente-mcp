@@ -4,13 +4,15 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { chromium } from 'playwright';
 import * as cheerio from 'cheerio';
+import { pathToFileURL } from 'node:url';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'fs';
 import { normalizeCookies } from './utils.js';
 import { normalizeCartProductId, quantityForCartUpdate, summarizeCartState } from './cart-utils.js';
-import { refreshAuthCookies } from './auth-session.js';
+import { refreshAuthCookies, resolveStatePaths } from './auth-session.js';
 
 const CONTINENTE_BASE = 'https://www.continente.pt';
-const STATE_DIR = process.env.CONTINENTE_STATE_DIR || `${process.env.HOME}/.continente`;
+const { stateDir: STATE_DIR, cookieFile: COOKIE_FILE } = resolveStatePaths();
+const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 function getPlatformUserAgent() {
   if (process.platform === 'win32') {
@@ -38,7 +40,7 @@ async function refreshAuthSession() {
 }
 
 async function ensureBrowser() {
-  const cookieFile = `${STATE_DIR}/cookies.json`;
+  const cookieFile = COOKIE_FILE;
   if (!existsSync(cookieFile)) {
     await refreshAuthSession();
   }
@@ -67,7 +69,7 @@ async function ensureBrowser() {
         await context.addCookies(normalized);
         loadedCookieMtimeMs = nextCookieMtimeMs;
       } catch (e) {
-        console.error('Failed to load cookies:', e.message);
+        console.error('Could not read the cookie cache; refresh login or replace the cache.');
       }
     }
   }
@@ -80,7 +82,8 @@ async function ensureBrowser() {
 
 async function goto(url, wait = 'networkidle') {
   await ensureBrowser();
-  await page.goto(url, { waitUntil: wait, timeout: 20000 });
+  const response = await page.goto(url, { waitUntil: wait, timeout: 20000 });
+  if (!response?.ok()) throw new Error(`Continente page returned HTTP ${response?.status() ?? 'unknown'}`);
   await page.waitForTimeout(1500);
   return page;
 }
@@ -109,6 +112,7 @@ async function closeBrowser() {
 
 async function fetchFavorites() {
   await goto(`${CONTINENTE_BASE}/conta/lista-produtos/?list=favorites`);
+  if (page.url().includes('/login')) return { error: 'not_authenticated' };
   const html = await page.content();
   const $ = cheerio.load(html);
   const products = [];
@@ -208,13 +212,17 @@ async function getCart() {
     if (!res.ok()) return { error: `http_${res.status()}` };
 
     const payload = await res.json();
-    return summarizeCartState(payload);
+    const cart = summarizeCartState(payload);
+    if (!cart.customerAuthenticated) return { error: 'not_authenticated' };
+    return cart;
   } catch (e) {
     return { error: e.message };
   }
 }
 
 async function updateCartItem(productId, quantity) {
+  const before = await getCart();
+  if (before.error) return { success: false, error: before.error };
   await goto(`${CONTINENTE_BASE}/checkout/carrinho/`);
 
   if (page.url().includes('/login')) return { error: 'not_authenticated' };
@@ -233,7 +241,7 @@ async function updateCartItem(productId, quantity) {
 
     let measureOptions = {};
     try {
-      measureOptions = updateEl.dataset.measureOptions ? JSON.parse(updateEl.dataset.measureOptions) : {};
+      measureOptions = updateEl?.dataset.measureOptions ? JSON.parse(updateEl.dataset.measureOptions) : {};
     } catch {
       measureOptions = {};
     }
@@ -253,36 +261,15 @@ async function updateCartItem(productId, quantity) {
 
   if (updateData.error) return { success: false, error: updateData.error };
 
-  if (Number(quantity) <= 0) {
+  if (quantity === 0) {
     if (!updateData.removeUrl || !updateData.removeUuid) {
       return { success: false, error: 'missing_remove_data' };
     }
 
     const params = new URLSearchParams({ pid: cartPid, uuid: updateData.removeUuid });
-    try {
-      const res = await context.request.get(`${CONTINENTE_BASE}${updateData.removeUrl}?${params.toString()}`, {
-        headers: { 'X-Requested-With': 'XMLHttpRequest' },
-        timeout: 10000
-      });
-      if (!res.ok()) return { success: false, status: res.status(), error: `HTTP ${res.status()}` };
-
-      await page.goto(`${CONTINENTE_BASE}/checkout/carrinho/`, { waitUntil: 'networkidle', timeout: 20000 });
-      const stillPresent = await page.evaluate(({ cartPid }) => {
-        return Array.from(document.querySelectorAll('[data-pid][data-product-name]'))
-          .some(el => el.dataset.pid === cartPid || el.querySelector(`input.add-to-cart-quantity[data-pid="${cartPid}-master"]`));
-      }, { cartPid });
-
-      if (stillPresent) return { success: false, error: 'remove_not_confirmed' };
-
-      return {
-        success: true,
-        product_id: cartPid,
-        requested_quantity: quantity,
-        cart_quantity: '0'
-      };
-    } catch (e) {
-      return { success: false, error: e.message };
-    }
+    const result = await requestCartChange(updateData.removeUrl, params);
+    if (result.error) return { success: false, error: result.error };
+    return verifyCartQuantity(cartPid, 0);
   }
 
   if (!updateData.updateUrl || !updateData.uuid) return { success: false, error: 'missing_update_data' };
@@ -305,28 +292,40 @@ async function updateCartItem(productId, quantity) {
     taggstarPromotionData: ''
   });
 
-  try {
-    const res = await context.request.get(`${updateData.updateUrl}?${params.toString()}`, {
-      headers: { 'X-Requested-With': 'XMLHttpRequest' },
-      timeout: 10000
-    });
-    if (!res.ok()) return { success: false, status: res.status(), error: `HTTP ${res.status()}` };
+  const result = await requestCartChange(updateData.updateUrl, params);
+  if (result.error) return { success: false, error: result.error };
+  return verifyCartQuantity(cartPid, quantity);
+}
 
-    await page.waitForTimeout(1000);
-    return {
-      success: true,
-      product_id: cartPid,
-      requested_quantity: quantity,
-      cart_quantity: formattedQuantity
-    };
-  } catch (e) {
-    return { success: false, error: e.message };
+async function requestCartChange(action, params) {
+  const url = new URL(action, CONTINENTE_BASE);
+  if (url.origin !== CONTINENTE_BASE) return { error: 'invalid_cart_action' };
+  for (const [key, value] of params) url.searchParams.set(key, value);
+  const res = await context.request.get(url.href, {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }, timeout: 10000
+  });
+  if (!res.ok()) return { error: `http_${res.status()}` };
+  const payload = await res.json();
+  if (payload?.error || payload?.success === false) return { error: 'cart_update_rejected' };
+  return { success: true };
+}
+
+async function verifyCartQuantity(productId, expectedQuantity) {
+  const cart = await getCart();
+  const actual = cart.items?.find(item => item.id === productId)?.qty ?? 0;
+  if (cart.error || Math.abs(actual - expectedQuantity) > 0.0005) {
+    // A write may have happened. Never automatically repeat it after this point.
+    return { success: false, error: 'cart_quantity_not_confirmed' };
   }
+  return { success: true, product_id: productId, cart_quantity: actual };
 }
 
 async function addToCart(productId, quantity = 1) {
+  const before = await getCart();
+  if (before.error) return { success: false, error: before.error };
   const slug = productId.endsWith('.html') ? productId : `${productId}.html`;
-  await goto(`${CONTINENTE_BASE}/produto/${slug}`);
+  await goto(`${CONTINENTE_BASE}/produto/${slug}`, 'domcontentloaded');
+  await page.waitForSelector('input.add-to-cart-url', { state: 'attached', timeout: 10000 });
 
   // Extract numeric PID and Cart-AddProduct URL from page
   const result = await page.evaluate(async (qty) => {
@@ -358,23 +357,12 @@ async function addToCart(productId, quantity = 1) {
     }
   }, quantity);
 
-  const cartState = summarizeCartState(result.payload);
-  const numericPid = normalizeCartProductId(productId);
-  const productPresent = cartState.items.some(item => item.id === numericPid);
-  const isAuthenticated = result.payload?.resources?.customerAuthenticated !== false;
-
-  if (!result.success || result.payload?.error || !productPresent || !isAuthenticated) {
-    return {
-      success: false,
-      status: result.status,
-      message: !isAuthenticated
-        ? 'Session is not authenticated to a Continente account.'
-        : result.error || result.payload?.message || 'Could not confirm product was added to the cart.',
-      cartState
-    };
+  if (!result.success || result.payload?.error || result.payload?.resources?.customerAuthenticated === false) {
+    return { success: false, error: 'cart_add_not_confirmed' };
   }
-
-  return result;
+  const numericPid = normalizeCartProductId(productId);
+  const previousQuantity = before.items.find(item => item.id === numericPid)?.qty ?? 0;
+  return verifyCartQuantity(numericPid, previousQuantity + quantity);
 }
 
 // ─── Order History ────────────────────────────────────────────────────────────
@@ -502,7 +490,8 @@ async function savePreferences(prefs) {
 }
 
 async function updatePreferencesFromFavorites() {
-  const favorites = await fetchFavorites();
+  const favorites = await retryAfterAutoLogin(() => fetchFavorites());
+  if (favorites?.error) throw new Error(favorites.error);
   const prefs = {
     favorites,
     lastUpdated: new Date().toISOString()
@@ -511,17 +500,17 @@ async function updatePreferencesFromFavorites() {
   return prefs;
 }
 
-function rankByPreference(products, preferences) {
+export function rankByPreference(products, preferences) {
   if (!preferences || !preferences.favorites) return products;
 
-  const favIds = new Set(preferences.favorites.map(f => f.productId));
+  const favIds = new Set(preferences.favorites.map(f => normalizeCartProductId(f.productId)));
   const favNames = new Map(preferences.favorites.map(f => [f.name.toLowerCase(), f]));
 
   return products.map(p => {
     let score = 0;
-    if (favIds.has(p.product_id)) score += 100;
+    if (favIds.has(normalizeCartProductId(p.product_id))) score += 100;
     const nameLower = p.name.toLowerCase();
-    for (const [favName, fav] of favNames) {
+    for (const favName of favNames.keys()) {
       if (nameLower.includes(favName) || favName.includes(nameLower)) score += 50;
     }
     return { ...p, score };
@@ -530,12 +519,14 @@ function rankByPreference(products, preferences) {
 
 // ─── MCP Server ───────────────────────────────────────────────────────────────
 
-class ContinenteServer {
+export class ContinenteServer {
   constructor() {
     this.server = new Server(
-      { name: 'continente-mcp', version: '3.1.0' },
+      { name: 'continente-mcp', version: VERSION },
       { capabilities: { tools: {} } }
     );
+    this.server.onclose = () => { void closeBrowser(); };
+    this.pending = Promise.resolve();
     this.setupTools();
   }
 
@@ -549,7 +540,7 @@ class ContinenteServer {
             type: 'object',
             properties: {
               query: { type: 'string', description: 'Search term (e.g., "leite", "pao")' },
-              limit: { type: 'number', description: 'Max results (default: 10)' }
+              limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Max results (default: 10)' }
             },
             required: ['query']
           }
@@ -576,7 +567,7 @@ class ContinenteServer {
             type: 'object',
             properties: {
               product_id: { type: 'string', description: 'Product ID from search results' },
-              quantity: { type: 'number', description: 'Quantity (default: 1)' }
+              quantity: { type: 'number', exclusiveMinimum: 0, description: 'Quantity (default: 1)' }
             },
             required: ['product_id']
           }
@@ -588,7 +579,7 @@ class ContinenteServer {
             type: 'object',
             properties: {
               product_id: { type: 'string', description: 'Product ID from search results or cart item' },
-              quantity: { type: 'number', description: 'Desired cart quantity' }
+              quantity: { type: 'number', minimum: 0, description: 'Desired cart quantity' }
             },
             required: ['product_id', 'quantity']
           }
@@ -599,7 +590,7 @@ class ContinenteServer {
           inputSchema: {
             type: 'object',
             properties: {
-              limit: { type: 'number', description: 'Number of orders (default: 5)' }
+              limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Number of orders (default: 5)' }
             }
           }
         },
@@ -609,7 +600,7 @@ class ContinenteServer {
           inputSchema: {
             type: 'object',
             properties: {
-              limit: { type: 'number', description: 'Number of recent orders to scan (default: 10)' }
+              limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Number of recent orders to scan (default: 10)' }
             }
           }
         },
@@ -621,9 +612,28 @@ class ContinenteServer {
       ]
     }));
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const { name, arguments: args } = request.params;
+    this.server.setRequestHandler(CallToolRequestSchema, request =>
+      this.callTool(request.params.name, request.params.arguments ?? {}));
+  }
+
+  callTool(name, args = {}) {
+    // All tools share one browser page, including close_session.
+    const result = this.pending.then(() => this.executeTool(name, args));
+    this.pending = result.catch(() => {});
+    return result;
+  }
+
+  async executeTool(name, args) {
       try {
+        if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Arguments must be an object');
+        if (['search_products', 'get_order_history', 'get_most_bought'].includes(name) && args.limit !== undefined &&
+          (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > 50)) throw new Error('limit must be an integer from 1 to 50');
+        if (name === 'search_products' && (typeof args.query !== 'string' || !args.query.trim())) throw new Error('query must be a non-empty string');
+        if (['add_to_cart', 'update_cart_item'].includes(name)) {
+          if (typeof args.product_id !== 'string' || !/^[a-zA-Z0-9_-]+(?:\.html)?$/.test(args.product_id)) throw new Error('Invalid product_id');
+          const quantity = args.quantity ?? (name === 'add_to_cart' ? 1 : undefined);
+          if (typeof quantity !== 'number' || !Number.isFinite(quantity) || quantity < 0 || (name === 'add_to_cart' && quantity === 0)) throw new Error('Invalid quantity');
+        }
         switch (name) {
           case 'search_products':
             return await this.handle_search(args.query, args.limit || 10);
@@ -634,7 +644,7 @@ class ContinenteServer {
           case 'get_cart':
             return await this.handle_get_cart();
           case 'add_to_cart':
-            return await this.handle_add_to_cart(args.product_id, args.quantity || 1);
+            return await this.handle_add_to_cart(args.product_id, args.quantity ?? 1);
           case 'update_cart_item':
             return await this.handle_update_cart_item(args.product_id, args.quantity);
           case 'get_order_history':
@@ -650,12 +660,11 @@ class ContinenteServer {
       } catch (error) {
         return { content: [{ type: 'text', text: `Error: ${error.message}` }], isError: true };
       }
-    });
   }
 
   formatProducts(products, preferences = null) {
     return products.map((p, i) => {
-      const fav = preferences?.favorites?.find(f => f.productId === p.product_id);
+      const fav = preferences?.favorites?.find(f => normalizeCartProductId(f.productId) === normalizeCartProductId(p.product_id));
       const favBadge = fav ? ' ⭐ (favorite)' : '';
       const unitStr = p.unit ? ` (${p.unit})` : '';
       return `${i + 1}. ${p.name}${favBadge}\n   💰 ${p.price?.toFixed(2) || '?'}€${unitStr}\n   🆔 ${p.product_id}`;
@@ -716,17 +725,15 @@ class ContinenteServer {
     if (!Array.isArray(cart.items) || cart.items.length === 0) {
       return { content: [{ type: 'text', text: '🛒 Cart is empty.' }] };
     }
-    const total = cart.total || cart.items.reduce((s, i) => s + (i.price || 0) * i.qty, 0);
+    const total = cart.total;
+    const totalText = total === null ? 'Unavailable' : `${total.toFixed(2)}€`;
     const list = cart.items.map((item, i) =>
-      `${i + 1}. ${item.name}\n   Qtd: ${item.qty} × ${item.price?.toFixed(2) || '?'}€`
+      `${i + 1}. ${item.name}\n   Qtd: ${item.qty} × ${item.price?.toFixed(2) || '?'}€\n   🆔 ${item.id}`
     ).join('\n');
-    const authNote = cart.customerAuthenticated
-      ? ''
-      : '\n\n⚠️ Session is not authenticated to a Continente account. This is the current storefront cart, which may differ from the basket in your logged-in browser.';
     return {
       content: [{
         type: 'text',
-        text: `🛒 Cart (${cart.items.length} items):\n\n${list}\n\n💶 Total: ${total.toFixed(2)}€${authNote}\n\nGo to https://www.continente.pt/checkout/carrinho/ to checkout.`
+        text: `🛒 Cart (${cart.items.length} items):\n\n${list}\n\n💶 Total: ${totalText}\n\nGo to https://www.continente.pt/checkout/carrinho/ to checkout.`
       }]
     };
   }
@@ -736,7 +743,7 @@ class ContinenteServer {
     if (result.success) {
       return { content: [{ type: 'text', text: `✅ Added to cart! (${quantity}x)\n\nUse get_cart to review.` }] };
     }
-    return { content: [{ type: 'text', text: `⚠️ ${result.message || 'Could not add to cart.'}` }], isError: true };
+    return { content: [{ type: 'text', text: `⚠️ ${result.error || result.message || 'Could not add to cart.'}` }], isError: true };
   }
 
   async handle_update_cart_item(productId, quantity) {
@@ -799,9 +806,11 @@ class ContinenteServer {
   async start() {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error('Continente MCP v3.1.0 started');
+    console.error(`Continente MCP v${VERSION} started`);
   }
 }
 
-const server = new ContinenteServer();
-server.start().catch(console.error);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const server = new ContinenteServer();
+  server.start().catch(error => { console.error(error.message); process.exitCode = 1; });
+}
