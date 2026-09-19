@@ -1,0 +1,47 @@
+name: Prepare release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        id: release
+        with:
+          target-branch: master
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      # Bot-created PR checks may require approval; bot-created tags do not
+      # trigger publishing. Explicit dispatch runs both without a PAT.
+      - name: Check release pull requests
+        if: steps.release.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_PRS: ${{ steps.release.outputs.prs }}
+        run: |
+          jq -r '.[].headBranchName' <<< "$RELEASE_PRS" | while IFS= read -r branch; do
+            gh workflow run ci.yml --ref "$branch"
+          done
+      - name: Publish created release through existing checks
+        if: steps.release.outputs.release_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
+        run: gh workflow run release.yml --ref "$RELEASE_TAG"

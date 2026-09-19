@@ -44,3 +44,10 @@ test('rejects invalid quantities before browser IO', () => {
   assert.throws(() => validateToolInput('add_to_cart', { product_id: '123', quantity: 0 }), /greater than zero/);
   assert.throws(() => validateToolInput('update_cart_item', { product_id: '123', quantity: -1 }), /non-negative/);
 });
+
+test('enforces the advertised 50-item limit for all limited tools', () => {
+  for (const name of ['search_products', 'get_order_history', 'get_most_bought']) {
+    assert.doesNotThrow(() => validateToolInput(name, { query: 'milk', limit: 50 }));
+    assert.throws(() => validateToolInput(name, { query: 'milk', limit: 51 }), /1 to 50/);
+  }
+});

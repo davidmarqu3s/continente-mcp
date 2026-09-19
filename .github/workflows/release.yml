@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,7 +13,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate-ref:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require an actual version tag
+        run: |
+          if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            echo "Release must run on a version tag, not a branch."
+            exit 1
+          fi
   checks:
+    needs: validate-ref
     uses: ./.github/workflows/ci.yml
   publish:
     needs: checks
