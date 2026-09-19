@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.1.0](https://github.com/davidmarqu3s/continente-mcp/compare/v4.0.0...v4.1.0) (2026-09-19)
+
+
+### Features
+
+* add structured tool results and automated release preparation ([#3](https://github.com/davidmarqu3s/continente-mcp/issues/3)) ([19772e3](https://github.com/davidmarqu3s/continente-mcp/commit/19772e31cfd918b2379256c780b70498d2d517ff))
+
 ## 4.0.0
 
 Stable release.
