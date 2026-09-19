@@ -21,3 +21,14 @@ test('mismatched tag, lockfile or missing release notes cannot publish', () => {
 test('Windows line endings preserve release notes', () => {
   assert.equal(checkRelease(pkg,lock,changelog.replaceAll('\n','\r\n'),'v4.0.0-rc.1').notes,'Candidate changes.');
 });
+
+test('extracts Release Please linked and dated headings without older notes', () => {
+  const stable = { name: pkg.name, version: '4.1.0' };
+  const notes = '# Changelog\n\n## [4.1.0](https://github.com/example/repo/compare/v4.0.0...v4.1.0) (2026-09-19)\n\n### Features\n\n* Structured results.\n\n## [4.0.0](https://example.com/old) (2026-09-17)\n\nOld notes.';
+  assert.equal(checkRelease(stable, { ...stable, packages: { '': stable } }, notes, 'v4.1.0').notes, '### Features\n\n* Structured results.');
+  assert.throws(() => checkRelease(stable, { ...stable, packages: { '': stable } }, notes.replace('[4.1.0]', '[4.1.01]'), 'v4.1.0'), /notes/i);
+});
+
+test('a version heading without a body cannot publish', () => {
+  assert.throws(() => checkRelease(pkg, lock, `## ${pkg.version}`), /notes/i);
+});
