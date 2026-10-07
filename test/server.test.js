@@ -34,6 +34,8 @@ test('server handler contracts', async (t) => {
   let mutations = 0;
   let mutationPayload = {};
   let postMutationCart;
+  let addMeasureOptions = {};
+  let postedAddQuantity;
   const updateData = {
     updateUrl: 'https://www.continente.pt/Cart-UpdateQuantity',
     uuid: 'test-line', measureOptions: {}, gtmIndex: '1',
@@ -63,7 +65,9 @@ test('server handler contracts', async (t) => {
     },
     async evaluate(_fn, arg) {
       browserOperations++;
+      if (arg === undefined) return addMeasureOptions;
       if (typeof arg === 'number') {
+        postedAddQuantity = arg;
         mutations++;
         payload = postMutationCart;
         return { success: true, status: 200, payload: mutationPayload };
@@ -250,6 +254,36 @@ test('server handler contracts', async (t) => {
         assert.equal(result.isError === true, finalQuantity !== 3, JSON.stringify(result));
         assert.equal(mutations, before + 1);
       }
+    });
+
+    await t.test('weighted products are added at the minimum, then set to the exact quantity', async () => {
+      addMeasureOptions = { hasConversionRate: true, hasAlternativeSaleUnit: true, primaryToSecondary: 0.2,
+        unitConversionRate: 0.2, minOrderQuantity: 0.6, stepQuantity: 0.2, primaryunit: 'kg', secondaryunit: 'un' };
+      try {
+        payload = cartWithQuantity(0);
+        postMutationCart = cartWithQuantity(4);
+        mutationPayload = postMutationCart;
+        const before = mutations;
+        const result = await server.callTool('add_to_cart', { product_id: 'milk-1234567', quantity: 4 });
+        assert.notEqual(result.isError, true, JSON.stringify(result));
+        assert.equal(postedAddQuantity, -1);
+        assert.equal(mutations, before + 2);
+
+        const beforeRejected = mutations;
+        payload = cartWithQuantity(0);
+        const tooFew = await server.callTool('add_to_cart', { product_id: 'milk-1234567', quantity: 1 });
+        assert.equal(tooFew.isError, true);
+        assert.match(tooFew.content[0].text, /below_minimum_quantity: the minimum is 3/);
+        assert.equal(mutations, beforeRejected);
+
+        // The minimum applies to the basket total, so one more is fine once some are in the basket.
+        payload = cartWithQuantity(4);
+        postMutationCart = cartWithQuantity(5);
+        postedAddQuantity = undefined;
+        const oneMore = await server.callTool('add_to_cart', { product_id: 'milk-1234567', quantity: 1 });
+        assert.notEqual(oneMore.isError, true, JSON.stringify(oneMore));
+        assert.equal(postedAddQuantity, undefined);
+      } finally { addMeasureOptions = {}; }
     });
 
     await t.test('missing authentication after a write fails without retrying the mutation', async (mutationTest) => {

@@ -319,6 +319,20 @@ async function addToCart(productId, quantity = 1) {
   await goto(`${CONTINENTE_BASE}/produto/${slug}`, 'domcontentloaded');
   await page.waitForSelector('input.add-to-cart-url', { state: 'attached', timeout: 10000 });
 
+  const measureOptions = await page.evaluate(() => {
+    const options = document.querySelector('.ct-tile-quantity-update[data-measure-options]')?.dataset.measureOptions;
+    try { return options ? JSON.parse(options) : {}; } catch { return null; }
+  });
+  if (!measureOptions) return { success: false, error: 'quantity_semantics_unknown', writeAttempted: false };
+  const numericPid = normalizeCartProductId(productId);
+  const previousQuantity = before.items.find(item => item.id === numericPid)?.qty ?? 0;
+  // Rejects unclear units and basket totals below the product minimum.
+  quantityForCartUpdate(previousQuantity + quantity, measureOptions);
+  // Like the website, weighted products are added at their minimum (-1), then set to the exact quantity.
+  const weighted = Boolean(measureOptions.hasAlternativeSaleUnit || measureOptions.hasConversionRate);
+  if (weighted && previousQuantity > 0) return updateCartItem(numericPid, previousQuantity + quantity);
+  const cartQuantity = weighted ? -1 : quantity;
+
   // Extract numeric PID and Cart-AddProduct URL from page
   const result = await page.evaluate(async (qty) => {
     const pidInput = document.querySelector('input[name="productID"]');
@@ -347,14 +361,15 @@ async function addToCart(productId, quantity = 1) {
     } catch (e) {
       return { success: false, message: e.message };
     }
-  }, quantity);
+  }, cartQuantity);
 
   if (!result.success || result.payload?.error || result.payload?.resources?.customerAuthenticated === false) {
     return { success: false, error: 'cart_add_not_confirmed', writeAttempted: true };
   }
-  const numericPid = normalizeCartProductId(productId);
-  const previousQuantity = before.items.find(item => item.id === numericPid)?.qty ?? 0;
-  return verifyCartQuantity(numericPid, previousQuantity + quantity);
+  if (!weighted) return verifyCartQuantity(numericPid, previousQuantity + quantity);
+  // The add already wrote to the basket, so any failure from here must not be retried.
+  const updated = await updateCartItem(numericPid, previousQuantity + quantity);
+  return updated.success ? updated : { ...updated, writeAttempted: true };
 }
 
 // ─── Order History ────────────────────────────────────────────────────────────
