@@ -40,6 +40,8 @@ async function refreshAuthSession() {
   return refreshed;
 }
 
+const NOT_LOGGED_IN = 'Not logged in. Add CONTINENTE_EMAIL and CONTINENTE_PASSWORD to ~/.continente/credentials.env (or the server environment), then try again.';
+
 async function ensureBrowser() {
   const cookieFile = COOKIE_FILE;
   if (!existsSync(cookieFile)) {
@@ -53,7 +55,12 @@ async function ensureBrowser() {
   }
 
   if (!browser) {
-    browser = await chromium.launch({ headless: true });
+    const launched = await chromium.launch({ headless: true });
+    // After a crash, start a fresh browser on the next call instead of failing until close_session.
+    launched.on('disconnected', () => {
+      if (browser === launched) { browser = context = page = null; loadedCookieMtimeMs = null; }
+    });
+    browser = launched;
   }
 
   if (!context) {
@@ -68,14 +75,15 @@ async function ensureBrowser() {
         const cookies = JSON.parse(readFileSync(cookieFile, 'utf8'));
         const normalized = normalizeCookies(cookies);
         await context.addCookies(normalized);
-        loadedCookieMtimeMs = nextCookieMtimeMs;
       } catch (e) {
         console.error('Could not read the cookie cache; refresh login or replace the cache.');
       }
+      // Record the attempt even when it fails, so an unreadable cache does not reset the session on every call.
+      loadedCookieMtimeMs = nextCookieMtimeMs;
     }
   }
 
-  if (!page) {
+  if (!page || page.isClosed()) {
     page = await context.newPage();
   }
   return browser;
@@ -408,14 +416,18 @@ async function getOrderHistory(limit = 5) {
       .filter(h => { if (seen.has(h)) return false; seen.add(h); return true; });
   });
 
-  // Fetch product lines for each order up to limit
-  const detailLinks = orderLinks.slice(0, limit);
-  for (let idx = 0; idx < detailLinks.length; idx++) {
+  // Links carry an internal ID, not the order number, so they are paired by position.
+  // If the counts disagree, show orders without items rather than attach the wrong ones.
+  if (orderLinks.length !== orders.length) {
+    orders.forEach(order => { order.linesUnavailable = true; });
+    return orders;
+  }
+  for (let idx = 0; idx < Math.min(limit, orders.length); idx++) {
     try {
-      const products = await getOrderProducts(detailLinks[idx]);
-      if (orders[idx]) orders[idx].lines = products.map(p => `${p.qty}x ${p.name}`);
+      const products = await getOrderProducts(orderLinks[idx]);
+      orders[idx].lines = products.map(p => `${p.qty}x ${p.name}`);
     } catch (e) {
-      // skip failed pages
+      orders[idx].linesUnavailable = true;
     }
   }
 
@@ -423,7 +435,8 @@ async function getOrderHistory(limit = 5) {
 }
 
 async function getOrderProducts(orderDetailUrl) {
-  await page.goto(orderDetailUrl, { waitUntil: 'networkidle', timeout: 20000 });
+  const response = await page.goto(orderDetailUrl, { waitUntil: 'networkidle', timeout: 20000 });
+  if (!response?.ok() || page.url().includes('/login')) throw new Error('order_detail_unavailable');
 
   return page.evaluate(() => {
     const products = [];
@@ -463,7 +476,9 @@ async function getMostBought(limit = 10) {
   // Tally products across recent orders
   const tally = new Map(); // name -> { qty, orders }
 
-  for (const link of orderLinks.slice(0, limit)) {
+  const scanned = orderLinks.slice(0, limit);
+  let failed = 0;
+  for (const link of scanned) {
     try {
       const products = await getOrderProducts(link);
       for (const { name, qty } of products) {
@@ -476,13 +491,15 @@ async function getMostBought(limit = 10) {
         }
       }
     } catch (e) {
-      // skip failed order pages
+      failed++;
     }
   }
+  if (failed === scanned.length) return { error: 'order_details_unavailable' };
 
-  return Array.from(tally.entries())
+  const products = Array.from(tally.entries())
     .map(([name, { qty, orders }]) => ({ name, qty, orders }))
     .sort((a, b) => b.qty - a.qty);
+  return { products, scanned: scanned.length, failed };
 }
 
 // ─── Preferences ───────────────────────────────────────────────────────────────
@@ -724,7 +741,7 @@ export class ContinenteServer {
   async handle_get_cart() {
     const cart = await retryAfterAutoLogin(() => getCart());
     if (cart?.error === 'not_authenticated') {
-      return { content: [{ type: 'text', text: 'Not logged in. Set CONTINENTE_EMAIL and CONTINENTE_PASSWORD in the MCP server environment, or refresh cookies manually.' }], isError: true };
+      return { content: [{ type: 'text', text: NOT_LOGGED_IN }], isError: true };
     }
     if (cart?.error) {
       return { content: [{ type: 'text', text: `Could not load cart. (${cart.error})` }], isError: true };
@@ -757,7 +774,7 @@ export class ContinenteServer {
   async handle_update_cart_item(productId, quantity) {
     const result = await retryAfterAutoLogin(() => updateCartItem(productId, quantity), true);
     if (result?.error === 'not_authenticated') {
-      return { content: [{ type: 'text', text: 'Not logged in. Set CONTINENTE_EMAIL and CONTINENTE_PASSWORD in the MCP server environment, or refresh cookies manually.' }], isError: true };
+      return { content: [{ type: 'text', text: NOT_LOGGED_IN }], isError: true };
     }
     if (result?.error === 'not_found') {
       return { content: [{ type: 'text', text: `Product ${productId} is not in the cart.` }], isError: true };
@@ -771,7 +788,7 @@ export class ContinenteServer {
   async handle_order_history(limit) {
     const orders = await retryAfterAutoLogin(() => getOrderHistory(limit));
     if (orders?.error === 'not_authenticated') {
-      return { content: [{ type: 'text', text: 'Not logged in. Set CONTINENTE_EMAIL and CONTINENTE_PASSWORD in the MCP server environment, or refresh cookies manually.' }], isError: true };
+      return { content: [{ type: 'text', text: NOT_LOGGED_IN }], isError: true };
     }
     if (!Array.isArray(orders) || orders.length === 0) {
       return { content: [{ type: 'text', text: 'Could not load order history. Check https://www.continente.pt/conta/encomendas/' }] };
@@ -780,7 +797,7 @@ export class ContinenteServer {
       if (o.raw) return `${i + 1}. ${o.raw}`;
       const date = o.date ? `📅 ${o.date}` : '';
       const total = o.total ? ` — ${o.total}` : '';
-      const lines = o.lines ? o.lines.join(' · ') : '';
+      const lines = o.lines ? o.lines.join(' · ') : o.linesUnavailable ? '(items could not be read)' : '';
       return `${i + 1}. ${date}${total}\n   ${lines}`;
     }).join('\n\n');
     return {
@@ -794,19 +811,20 @@ export class ContinenteServer {
   async handle_most_bought(limit) {
     const result = await retryAfterAutoLogin(() => getMostBought(limit));
     if (result.error) {
-      return { content: [{ type: 'text', text: result.error === 'not_authenticated' ? 'Not logged in. Set CONTINENTE_EMAIL and CONTINENTE_PASSWORD in the MCP server environment, or refresh cookies manually.' : `Error: ${result.error}` }], isError: true };
+      return { content: [{ type: 'text', text: result.error === 'not_authenticated' ? NOT_LOGGED_IN : `Error: ${result.error}` }], isError: true };
     }
-    if (!Array.isArray(result) || result.length === 0) {
+    if (!Array.isArray(result.products) || result.products.length === 0) {
       return { content: [{ type: 'text', text: 'Could not calculate most bought items from order history.' }] };
     }
-    const top = result.slice(0, 25);
+    const top = result.products.slice(0, 25);
     const list = top.map((item, i) =>
       `${i + 1}. ${item.name} — ${item.qty} units across ${item.orders} order${item.orders > 1 ? 's' : ''}`
     ).join('\n');
     return {
       content: [{
         type: 'text',
-        text: `Most bought products (calculated from your order history):\n\n${list}`
+        text: `Most bought products (calculated from your order history):\n\n${list}` +
+          (result.failed ? `\n\n⚠️ ${result.failed} of ${result.scanned} orders could not be read and are not counted.` : '')
       }]
     };
   }
