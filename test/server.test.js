@@ -71,6 +71,7 @@ test('server handler contracts', async (t) => {
       return updateData;
     },
     url() { return currentUrl; },
+    isClosed() { return false; },
     async close() {},
   };
   const context = {
@@ -91,6 +92,7 @@ test('server handler contracts', async (t) => {
     },
   };
   t.mock.method(chromium, 'launch', async () => ({
+    on() {},
     async newContext() { return context; },
     async close() {},
   }));
