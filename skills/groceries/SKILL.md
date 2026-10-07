@@ -22,11 +22,11 @@ The goal is to pick the product the user actually buys, not just any product wit
 
 **1. Search with favourites context**
 
-Call `search_products` with the item name. Results are automatically ranked by the favourites list — the top result is usually correct. Note the top 3.
+Call `search_products` with the item name. Favourites are ranked first and marked ⭐ — the top result is usually correct. Note the top 3.
 
-**2. Cross-check favourites**
+**2. Prefer favourites**
 
-Call `get_favorites` once (reuse for all items in this request). If any favourite matches the item name, prefer it — even if not the top search result. A favourite is a stronger signal than search rank.
+If any result is marked ⭐, prefer it — even if it is not the top result. A favourite is a stronger signal than search rank. If nothing is marked and the user seems to have favourites, call `refresh_favorites` once and search again.
 
 **3. Fallback: order history**
 
@@ -40,7 +40,10 @@ If confidence is high (clear favourite or obvious top result), add silently and 
 
 Call `add_to_cart` with `product_id`. Default quantity is 1 unless specified (e.g. "2 pacotes de leite").
 
-After adding products with a requested quantity greater than 1, call `get_cart` and verify the displayed quantity. Some Continente products use internal weighted units, so the quantity returned by `add_to_cart` can differ from the requested display quantity. If the cart quantity is wrong, call `update_cart_item` with the same `product_id` and the desired displayed quantity, then call `get_cart` again.
+`add_to_cart` and `update_cart_item` both check the basket afterwards and only report success when it holds the requested quantity. Products sold by weight (e.g. bananas) are counted in units, like on the website.
+
+- `below_minimum_quantity` — the product has a minimum, shown as ⚖️ in search results and in the error. Nothing was added; ask whether to add the minimum instead.
+- `cart_add_not_confirmed` or `cart_quantity_not_confirmed` — the change may still have happened. Call `get_cart`, never repeat `add_to_cart`, and correct with `update_cart_item` if needed.
 
 ## Output format
 
@@ -56,9 +59,9 @@ After all items are processed, print a compact summary:
 ## Error handling
 
 - No search results → report as not found, skip, continue with others
-- `add_to_cart` fails → report the error, move on
+- `add_to_cart` fails → handle the errors above, otherwise report the error and move on
 - Never stop the whole run because one item failed
 
 ## Performance
 
-`get_favorites` is slow. Call it once and reuse across all items. Only call `get_order_history` when favourites give no clear signal.
+`get_order_history` opens each order and is slow. Only call it when search and favourites give no clear signal.
