@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { normalizeCartProductId, quantityForCartUpdate } from '../src/cart-utils.js';
+import { normalizeCartProductId, parseOrderQuantity, quantityForCartUpdate, tallyMostBought } from '../src/cart-utils.js';
 
 test('normalizes search result product ids to cart pids', () => {
   assert.equal(normalizeCartProductId('banana-continente-continente-2597619'), '2597619');
@@ -48,4 +48,21 @@ test('converts alternative unit products to primary quantity', () => {
   };
 
   assert.equal(quantityForCartUpdate(12, options), '2.4');
+});
+
+test('order quantities keep decimals and units', () => {
+  assert.deepEqual(parseOrderQuantity('12 un'), { qty: 12, unit: 'un' });
+  assert.deepEqual(parseOrderQuantity('1.2 kg'), { qty: 1.2, unit: 'kg' });
+  assert.deepEqual(parseOrderQuantity('1,5 kg'), { qty: 1.5, unit: 'kg' });
+  assert.deepEqual(parseOrderQuantity('3'), { qty: 3, unit: 'un' });
+});
+
+test('most bought keeps units and weights apart and counts each order once', () => {
+  const result = tallyMostBought([
+    [{ name: 'Banana', qty: 12, unit: 'un' }, { name: 'Milk', qty: 6, unit: 'un' }],
+    [{ name: 'Banana', qty: 1.2, unit: 'kg' }, { name: 'Banana', qty: 0.4, unit: 'kg' }],
+    [{ name: 'Milk', qty: 2, unit: 'un' }, { name: 'Banana', qty: 8, unit: 'un' }],
+  ]);
+  assert.deepEqual(result[0], { name: 'Banana', quantities: { un: 20, kg: 1.6 }, orders: 3 });
+  assert.deepEqual(result[1], { name: 'Milk', quantities: { un: 8 }, orders: 2 });
 });

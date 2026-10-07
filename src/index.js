@@ -7,7 +7,7 @@ import * as cheerio from 'cheerio';
 import { pathToFileURL } from 'node:url';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, realpathSync } from 'fs';
 import { normalizeCookies } from './utils.js';
-import { normalizeCartProductId, quantityForCartUpdate, summarizeCartState } from './cart-utils.js';
+import { normalizeCartProductId, parseOrderQuantity, quantityForCartUpdate, summarizeCartState, tallyMostBought } from './cart-utils.js';
 import { refreshAuthCookies, resolveStatePaths } from './auth-session.js';
 import { createQueue, normalizeFavoriteId, retryAuthentication, validateToolInput } from './reliability.js';
 
@@ -143,10 +143,30 @@ async function fetchFavorites() {
 
 // ─── Product Search ────────────────────────────────────────────────────────────
 
-async function searchProducts(query, limit = 10) {
+async function searchProducts(query, extraPages = 0) {
   await goto(`${CONTINENTE_BASE}/pesquisa/?q=${encodeURIComponent(query)}`);
   const html = await page.content();
-  return parseProducts(html, limit);
+  const products = parseProducts(html, Infinity);
+
+  // The search page holds one page of results (35); the grid endpoint serves the next ones.
+  const moreUrl = extraPages > 0 ? cheerio.load(html)('[data-url*="Search-UpdateGrid"]').attr('data-url') : null;
+  if (moreUrl) {
+    const url = new URL(moreUrl, CONTINENTE_BASE);
+    const start = Number(url.searchParams.get('start')) || products.length;
+    const size = Number(url.searchParams.get('sz')) || products.length;
+    if (url.origin === CONTINENTE_BASE && size > 0) {
+      const pages = await Promise.all(Array.from({ length: extraPages }, (_, i) => {
+        url.searchParams.set('start', String(start + i * size));
+        return context.request.get(url.href, { timeout: 10000 })
+          .then(res => res.ok() ? res.text() : '')
+          .catch(() => '');
+      }));
+      for (const pageHtml of pages) products.push(...parseProducts(pageHtml, Infinity));
+    }
+  }
+
+  const seen = new Set();
+  return products.filter(p => !seen.has(p.product_id) && seen.add(p.product_id));
 }
 
 function parseProducts(html, limit = 30) {
@@ -403,7 +423,7 @@ async function getOrderHistory(limit = 5) {
   for (let idx = 0; idx < Math.min(limit, orders.length); idx++) {
     try {
       const products = await getOrderProducts(orderLinks[idx]);
-      orders[idx].lines = products.map(p => `${p.qty}x ${p.name}`);
+      orders[idx].lines = products.map(p => `${p.unit === 'un' ? `${p.qty}x` : `${p.qty} ${p.unit}`} ${p.name}`);
     } catch (e) {
       orders[idx].linesUnavailable = true;
     }
@@ -416,7 +436,7 @@ async function getOrderProducts(orderDetailUrl) {
   const response = await page.goto(orderDetailUrl, { waitUntil: 'networkidle', timeout: 20000 });
   if (!response?.ok() || page.url().includes('/login')) throw new Error('order_detail_unavailable');
 
-  return page.evaluate(() => {
+  const products = await page.evaluate(() => {
     const products = [];
     document.querySelectorAll('[class*="product-line"]').forEach(el => {
       const qtyEl = el.querySelector('[class*="qty"], [class*="quantity"], [class*="amount"]');
@@ -427,13 +447,11 @@ async function getOrderProducts(orderDetailUrl) {
       // Take only first line — rest is brand/subcopy
       const name = rawName.split('\n')[0].trim();
 
-      const qtyMatch = qtyEl.textContent.trim().match(/^(\d+)/);
-      const qty = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
-
-      if (name && name.length > 3) products.push({ name, qty });
+      if (name && name.length > 3) products.push({ name, qtyText: qtyEl.textContent.trim() });
     });
     return products;
   });
+  return products.map(({ name, qtyText }) => ({ name, ...parseOrderQuantity(qtyText) }));
 }
 
 async function getMostBought(limit = 10) {
@@ -451,33 +469,21 @@ async function getMostBought(limit = 10) {
 
   if (orderLinks.length === 0) return { error: 'no_orders' };
 
-  // Tally products across recent orders
-  const tally = new Map(); // name -> { qty, orders }
+  const orderProducts = [];
 
   const scanned = orderLinks.slice(0, limit);
   let failed = 0;
   for (const link of scanned) {
     try {
       const products = await getOrderProducts(link);
-      for (const { name, qty } of products) {
-        const existing = tally.get(name);
-        if (existing) {
-          existing.qty += qty;
-          existing.orders += 1;
-        } else {
-          tally.set(name, { qty, orders: 1 });
-        }
-      }
+      orderProducts.push(products);
     } catch (e) {
       failed++;
     }
   }
   if (failed === scanned.length) return { error: 'order_details_unavailable' };
 
-  const products = Array.from(tally.entries())
-    .map(([name, { qty, orders }]) => ({ name, qty, orders }))
-    .sort((a, b) => b.qty - a.qty);
-  return { products, scanned: scanned.length, failed };
+  return { products: tallyMostBought(orderProducts), scanned: scanned.length, failed };
 }
 
 // ─── Preferences ───────────────────────────────────────────────────────────────
@@ -672,7 +678,8 @@ export class ContinenteServer {
 
   async handle_search(query, limit) {
     const prefs = await getPreferences();
-    const products = await searchProducts(query, limit * 2);
+    // Look further down the results when there are favourites to rank first.
+    const products = await searchProducts(query, prefs?.favorites?.length ? 2 : 0);
     const ranked = rankByPreference(products, prefs);
     const top = ranked.slice(0, limit);
 
@@ -794,7 +801,7 @@ export class ContinenteServer {
     }
     const top = result.products.slice(0, 25);
     const list = top.map((item, i) =>
-      `${i + 1}. ${item.name} — ${item.qty} units across ${item.orders} order${item.orders > 1 ? 's' : ''}`
+      `${i + 1}. ${item.name} — ${Object.entries(item.quantities).map(([unit, qty]) => `${qty} ${unit}`).join(' + ')} across ${item.orders} order${item.orders > 1 ? 's' : ''}`
     ).join('\n');
     return {
       content: [{
