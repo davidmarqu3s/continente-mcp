@@ -19,8 +19,10 @@ export function quantityForCartUpdate(displayQuantity, measureOptions = {}) {
   const conversion = Number(measureOptions.primaryToSecondary ?? measureOptions.unitConversionRate);
   const hasAlternativeUnit = measureOptions.hasAlternativeSaleUnit || measureOptions.hasConversionRate;
   if ((hasAlternativeUnit && (!Number.isFinite(conversion) || conversion <= 0)) ||
-    (!hasAlternativeUnit && measureOptions.primaryunit && measureOptions.secondaryunit &&
-      measureOptions.primaryunit !== measureOptions.secondaryunit)) {
+    // Without an alternative sale unit, quantities are counted in the primary unit;
+    // secondaryunit is only the price reference (e.g. €/kg for a unit product).
+    (!hasAlternativeUnit && ((measureOptions.primaryunit && measureOptions.primaryunit !== 'un') ||
+      (measureOptions.selectedunit && measureOptions.selectedunit !== 'primary')))) {
     throw new Error('quantity_semantics_unknown');
   }
   const cartQuantity = hasAlternativeUnit ? quantity * conversion : quantity;
