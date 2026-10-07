@@ -2,31 +2,28 @@
 
 ## 4.0.0
 
-Stable release.
+Continente MCP: search Continente.pt, rank favourites, manage your basket and read order history from any MCP client.
 
 ### Breaking changes
 
-- Node.js 20.18.1 or newer is required, matching dependency requirements.
-- Personal backup, keepalive and browser-cookie export utilities are no longer shipped in this package. Existing operators must migrate their scheduled script paths. Normal MCP tools use automatic login and do not require these utilities.
+1. **Node.js 20.18.1 or newer required** — matches the minimum needed by dependencies; upgrade Node before updating.
+2. **Personal maintenance scripts removed from the package** — backup, keepalive and browser-cookie export utilities are no longer shipped; the MCP tools log in automatically and do not need them. If you scheduled these scripts, point those jobs elsewhere before updating.
 
-### Fixes
+### Login and setup
 
-- Automatic login from a private credentials file, consistent cookie paths, Windows profile support and login paths containing spaces.
-- Basket reads distinguish unknown responses from empty baskets; mutations require an authenticated basket and confirmed final quantities.
-- Invalid quantities are rejected before changes; concurrent tools no longer navigate the same page at the same time.
-- Favourite matching handles numeric IDs, slugs and .html links; failed refreshes retain the cache.
-- Missing prices remain unknown; malformed-cookie diagnostics do not expose cookie values.
-- Compatible dependency updates resolve the audit findings; duplicate setup documentation and obsolete development artifacts removed.
+3. **Automatic login from a private credentials file** — set your email and password once in `~/.continente/credentials.env`; expired sessions log in again on their own.
+4. **Consistent paths on every platform** — cookie and state paths resolve the same way everywhere, including Windows profiles and paths containing spaces.
 
-### Live basket verification
+### Safer basket changes
 
-On 12 September 2026, the native signed-in website confirmed that `Cart-MiniCartShow` with `basket: {}` represents a session without a basket yet. The stricter audit check had mistakenly rejected that valid empty state. The parser now recognises that exact response while still rejecting guests and malformed responses.
+5. **Basket reads never guess** — an unrecognised basket page is reported as an error instead of an empty basket.
+6. **Changes are confirmed** — adds and quantity updates require a signed-in basket and check the final quantity; invalid quantities are rejected before anything changes.
+7. **No overlapping browser actions** — tools called at the same time run one after another instead of navigating the same page together.
 
-The MCP was verified live through empty → add one product → read quantity one → update to two → remove → empty. The test product was removed; no order was placed. Adding also now waits for the product form rather than for background network traffic to become idle. This verification covers an ordinary unit product; it does not certify every weighted product variant.
+### Favourites and products
 
-### Release process
-
-One manifest version, matching lockfile and Git tag; cross-platform checks; npm publishing followed by a matching GitHub release. Stable releases use npm's `latest` channel.
+8. **Favourites match more reliably** — numeric IDs, slugs and `.html` links all match; a failed refresh keeps the cached list.
+9. **Missing prices stay unknown** — products without a price are no longer shown as free.
 
 ## 3.1.0
 

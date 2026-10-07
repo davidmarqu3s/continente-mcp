@@ -1,6 +1,6 @@
 # Releases
 
-Each project has its own version sequence. Continente uses semantic versions and matching `vX.Y.Z` tags. `package.json` is the runtime version source; the lockfile and Release Please manifest track the same released version. Published versions and tags are immutable. Existing 4.0.0 history is preserved.
+Each project has its own version sequence. Continente uses semantic versions and matching `vX.Y.Z` tags. `package.json` is the runtime version source; the lockfile and Release Please manifest track the same released version. Published versions and tags are immutable.
 
 ## Everyday contributions
 
@@ -15,7 +15,7 @@ Do not bump versions in ordinary PRs. Release Please maintains one accumulating 
 
 ## Automation
 
-`.github/workflows/release-please.yml` runs on master and can be manually dispatched. It uses a pinned Release Please action and the built-in GitHub token. The repository must allow GitHub Actions to create pull requests; workflow permissions grant only the capabilities needed by the job.
+`.github/workflows/release-please.yml` runs on main and can be manually dispatched. It uses a pinned Release Please action and the built-in GitHub token. The repository must allow GitHub Actions to create pull requests; workflow permissions grant only the capabilities needed by the job.
 
 Bot-created PR checks may require approval, and bot-created tags do not automatically trigger publishing. The preparation workflow explicitly dispatches `ci.yml` on each created/updated release branch and `release.yml` on each new release tag. No long-lived personal token is required.
 
@@ -24,7 +24,7 @@ Before merging a release PR:
 1. Review the version and changelog. Confirm manifests match and all five platform checks pass on the current release PR commit.
 2. Run live account verification appropriate to the changes. Automated CI uses isolated state and a real Chromium startup; it does not verify the signed-in storefront. Never place an order or pay as a test.
 3. Merge the release PR. Release Please then creates the tag/GitHub release and dispatches the npm publisher. The publisher reruns checks, validates the exact tag/version/lockfile/notes, and publishes the checked package via npm trusted publishing.
-4. Verify npm and the Release workflow succeeded; a GitHub release by itself does not prove npm publication. Deployments are separate: explicitly update pinned Mac/Optiplex installations and record their version/commit.
+4. Verify npm and the Release workflow succeeded; a GitHub release by itself does not prove npm publication. Publishing does not update existing installations; update pinned deployments separately.
 
 The default accumulating release PR proposes stable releases. For a risky candidate, deliberately prepare a reviewed semantic prerelease such as `4.1.0-rc.1`; do not merge the normal stable release PR prematurely. The publisher routes prereleases to npm `next` and stable versions to `latest`.
 
