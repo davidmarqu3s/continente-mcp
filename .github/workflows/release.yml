@@ -61,6 +61,8 @@ jobs:
             node --input-type=module -e "import fs from 'node:fs'; const result = JSON.parse(fs.readFileSync('registry.json')); if (result.error?.code !== 'E404') throw new Error('Could not check the npm registry');"
             npm publish "continente-mcp-$VERSION.tgz" --access public --tag "$DIST_TAG"
           fi
+      - name: Add the release header
+        run: cat .github/release-header.md release-notes.md > release-body.md && mv release-body.md release-notes.md
       - name: Create matching GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
