@@ -1,59 +1,63 @@
 # Continente MCP
 
-A local MCP server for [Continente.pt](https://www.continente.pt): search products, rank favourites, manage your basket and read order history. Checkout and payment stay on Continente.pt.
+Let your AI assistant search Continente.pt and fill your basket with the products you usually buy.
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+## Features
+
+- **Search that knows your habits** — catalogue results put your saved favourites first.
+- **Hands-free basket** — add, change and remove items; every change is checked against the basket afterwards.
+- **Order history** — read recent orders and see your most-bought products.
+- **Automatic login** — expired sessions sign in again on their own from a private credentials file.
+- **You stay in control** — checkout and payment always happen on Continente.pt.
 
 ## Install
 
-Requires Node.js 20.18.1 or later. Product search works without an account; favourites, basket and order history need a Continente login.
+Requires Node.js 20.18.1 or later. Install the browser the server uses (on Linux, add `--with-deps`):
 
 ```bash
-git clone https://github.com/davidmarqu3s/continente-mcp
-cd continente-mcp
-npm install
-npm run setup
-mkdir -p ~/.continente
-cp .env.example ~/.continente/credentials.env
-chmod 600 ~/.continente/credentials.env
+npx -y -p continente-mcp playwright install chromium
 ```
 
-Set `CONTINENTE_EMAIL` and `CONTINENTE_PASSWORD` in `~/.continente/credentials.env`, then check the login:
+For favourites, basket and order history, create `~/.continente/credentials.env` (owner-only, `chmod 600`) with your Continente login. Search works without it.
 
-```bash
-node continente-auto-login.js
+```
+CONTINENTE_EMAIL=you@example.com
+CONTINENTE_PASSWORD=your-password
 ```
 
-The server logs in again automatically when the session expires. On Windows, use your user profile directory instead of `~`.
-
-## Use
-
-Add the server to your MCP client and restart it:
+Then add the server to your MCP client and restart it:
 
 ```json
 {
   "mcpServers": {
-    "continente": {
-      "command": "node",
-      "args": ["/absolute/path/to/continente-mcp/src/index.js"]
-    }
+    "continente": { "command": "npx", "args": ["-y", "continente-mcp"] }
   }
 }
 ```
 
-You can also run the published package with `npx continente-mcp`.
+To run from source instead, clone the repository, run `npm install && npm run setup`, and use `node /absolute/path/to/continente-mcp/src/index.js` as the command.
+
+## Use
+
+Ask your assistant things like "add milk, eggs and bread to my Continente basket". Run `refresh_favorites` once so searches know what you buy.
 
 | Tool | Purpose |
 | --- | --- |
-| `search_products` | Search the catalogue, with favourites ranked first |
+| `search_products` | Search the catalogue, favourites first |
 | `get_favorites` / `refresh_favorites` | Read cached favourites / refresh them from your account |
 | `get_cart` | Read the basket |
-| `add_to_cart` | Add a product by ID |
-| `update_cart_item` | Set a basket quantity; zero removes the item |
+| `add_to_cart` / `update_cart_item` | Add a product / set its quantity (zero removes it) |
 | `get_order_history` / `get_most_bought` | Read recent orders / your most-bought products |
 | `close_session` | Close the browser session |
 
-Run `refresh_favorites` once to personalise search. The [groceries skill](skills/groceries/SKILL.md) helps agents pick the products you usually buy.
+## More
 
-Optional settings, such as custom state and cookie paths, are listed in [`.env.example`](.env.example). Keep credentials and `~/.continente/cookies.json` private: both give access to your account.
+- **Agents:** the [groceries skill](skills/groceries/SKILL.md) teaches assistants to pick the products you usually buy.
+- **Settings:** custom credential, state and cookie paths are listed in [`.env.example`](.env.example).
+- **Troubleshooting:** [docs/troubleshooting.md](docs/troubleshooting.md).
+- **Developers:** [docs/development.md](docs/development.md) and [docs/releases.md](docs/releases.md).
 
 ## License
 
