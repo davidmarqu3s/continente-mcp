@@ -36,6 +36,7 @@ test('server handler contracts', async (t) => {
   let postMutationCart;
   let addMeasureOptions = {};
   let postedAddQuantity;
+  const gridPages = new Map();
   const updateData = {
     updateUrl: 'https://www.continente.pt/Cart-UpdateQuantity',
     uuid: 'test-line', measureOptions: {}, gtmIndex: '1',
@@ -85,6 +86,10 @@ test('server handler contracts', async (t) => {
     request: {
       async get(url) {
         browserOperations++;
+        if (/Search-UpdateGrid/.test(url)) {
+          const html = gridPages.get(new URL(url).searchParams.get('start')) ?? '';
+          return { ok: () => true, status: () => 200, text: async () => html };
+        }
         if (/\/Cart-MiniCartShow$/.test(url)) {
           return { ok: () => true, status: () => 200, json: async () => payload };
         }
@@ -201,6 +206,21 @@ test('server handler contracts', async (t) => {
       assert.match(result.content[0].text, /Banana[^]*⚖️ Minimum 600 gr \(3 un\)/);
       assert.doesNotMatch(result.content[0].text, /Melon[^]*Minimum/);
       assert.equal(result.structuredContent.products.find(p => p.name === 'Banana').minimum, '600 gr (3 un)');
+    });
+
+    await t.test('favourites further down the results are still ranked first', async () => {
+      writeFileSync(join(stateDir, 'preferences.json'), JSON.stringify({
+        favorites: [{ productId: 'deep-yogurt-7777777', name: 'Deep yogurt' }],
+      }));
+      const tile = (id, name) => `<div class="ct-inner-tile-wrap"><a href="/produto/${id}.html">${name}</a><span class="pwc-tile--price-primary">1,00€</span></div>`;
+      html = tile('first-1111111', 'First yogurt') +
+        '<button data-url="/on/demandware.store/Sites-continente-Site/default/Search-UpdateGrid?q=yogurt&start=35&sz=35"></button>';
+      gridPages.set('35', tile('second-2222222', 'Second yogurt'));
+      gridPages.set('70', tile('deep-yogurt-7777777', 'Deep yogurt'));
+      try {
+        const result = await server.handle_search('yogurt', 1);
+        assert.match(result.content[0].text, /1\. Deep yogurt ⭐/);
+      } finally { gridPages.clear(); }
     });
 
     await t.test('failed favorites refresh preserves the cached favorites', async () => {
