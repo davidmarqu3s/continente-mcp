@@ -5,7 +5,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { chromium } from 'playwright';
 import * as cheerio from 'cheerio';
 import { pathToFileURL } from 'node:url';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, realpathSync } from 'fs';
 import { normalizeCookies } from './utils.js';
 import { normalizeCartProductId, quantityForCartUpdate, summarizeCartState } from './cart-utils.js';
 import { refreshAuthCookies, resolveStatePaths } from './auth-session.js';
@@ -794,7 +794,8 @@ export class ContinenteServer {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// npm bins run through symlinks, so compare the resolved path.
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const server = new ContinenteServer();
   server.start().catch(error => { console.error(error.message); process.exitCode = 1; });
 }
