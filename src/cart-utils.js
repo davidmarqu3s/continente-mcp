@@ -87,3 +87,27 @@ function moneyOrNull(value) {
   const amount = Number(value);
   return Number.isFinite(amount) && amount >= 0 ? amount : null;
 }
+
+// Order lines show "12 un", or "1.2 kg" for products bought by weight.
+export function parseOrderQuantity(text) {
+  const match = String(text ?? '').trim().match(/^(\d+(?:[.,]\d+)?)\s*([a-zA-Z]*)/);
+  if (!match) return { qty: 1, unit: 'un' };
+  return { qty: Number(match[1].replace(',', '.')), unit: match[2].toLowerCase() || 'un' };
+}
+
+// Units and weights cannot be added together, so totals are kept per unit.
+// Sorted by how many orders include the product, then by units bought.
+export function tallyMostBought(orders) {
+  const tally = new Map();
+  for (const products of orders) {
+    const seenInOrder = new Set();
+    for (const { name, qty, unit } of products) {
+      const entry = tally.get(name) ?? { name, quantities: {}, orders: 0 };
+      entry.quantities[unit] = Number(((entry.quantities[unit] ?? 0) + qty).toFixed(3));
+      if (!seenInOrder.has(name)) { entry.orders += 1; seenInOrder.add(name); }
+      tally.set(name, entry);
+    }
+  }
+  return Array.from(tally.values())
+    .sort((a, b) => b.orders - a.orders || (b.quantities.un ?? 0) - (a.quantities.un ?? 0));
+}
