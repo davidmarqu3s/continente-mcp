@@ -127,3 +127,19 @@ test('standalone login runs from a path containing spaces', async (t) => {
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Missing CONTINENTE_EMAIL or CONTINENTE_PASSWORD/);
 });
+
+test('cookie cache is created owner-only', { skip: process.platform === 'win32' && 'POSIX permissions' }, async () => {
+  const { writeCookies } = await import('../continente-auto-login.js');
+  const { mkdtempSync, rmSync, statSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = mkdtempSync(join(tmpdir(), 'continente-cookie-mode-'));
+  try {
+    const file = join(root, 'state', 'cookies.json');
+    writeCookies(file, []);
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    assert.equal(statSync(join(root, 'state')).mode & 0o777, 0o700);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

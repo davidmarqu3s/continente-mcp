@@ -42,7 +42,8 @@ jobs:
           node-version: '24'
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      - run: npm ci
+      # Publishing only packs files; skip dependency install scripts while holding publish rights.
+      - run: npm ci --ignore-scripts
       - name: Check version, tag and release notes
         id: release
         run: npm run check:release -- "$GITHUB_REF_NAME"

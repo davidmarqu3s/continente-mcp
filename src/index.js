@@ -5,7 +5,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { chromium } from 'playwright';
 import * as cheerio from 'cheerio';
 import { pathToFileURL } from 'node:url';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, realpathSync } from 'fs';
+import { chmodSync, existsSync, readFileSync, writeFileSync, mkdirSync, statSync, realpathSync } from 'fs';
 import { normalizeCookies } from './utils.js';
 import { normalizeCartProductId, quantityForCartUpdate, summarizeCartState } from './cart-utils.js';
 import { refreshAuthCookies, resolveStatePaths } from './auth-session.js';
@@ -348,6 +348,8 @@ async function addToCart(productId, quantity = 1) {
     const pid = pidInput.value;
     const cartUrl = urlInput.value;
     const csrf = csrfInput ? csrfInput.value : '';
+    // Only send the session and CSRF token to Continente itself.
+    if (new URL(cartUrl, location.href).origin !== location.origin) return { success: false, message: 'invalid_cart_action' };
 
     const body = new URLSearchParams({ pid, quantity: String(qty), options: '[]' });
     if (csrf) body.append('csrf_token', csrf);
@@ -402,6 +404,7 @@ async function getOrderHistory(limit = 5) {
     const seen = new Set();
     return Array.from(document.querySelectorAll('a[href*="detalhe-encomenda"]'))
       .map(a => a.href)
+      .filter(h => h.startsWith(`${location.origin}/`))
       .filter(h => { if (seen.has(h)) return false; seen.add(h); return true; });
   });
 
@@ -495,9 +498,10 @@ async function getPreferences() {
 }
 
 async function savePreferences(prefs) {
-  try { mkdirSync(STATE_DIR, { recursive: true }); } catch (e) {}
+  try { mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 }); } catch (e) {}
   const prefsFile = `${STATE_DIR}/preferences.json`;
-  writeFileSync(prefsFile, JSON.stringify(prefs, null, 2));
+  writeFileSync(prefsFile, JSON.stringify(prefs, null, 2), { mode: 0o600 });
+  chmodSync(prefsFile, 0o600);
 }
 
 async function updatePreferencesFromFavorites() {

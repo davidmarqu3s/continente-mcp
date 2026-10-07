@@ -13,9 +13,10 @@ function log(message) {
   console.error(`[continente-auto-login] ${message}`);
 }
 
-function writeCookies(path, cookies) {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(cookies, null, 2));
+export function writeCookies(path, cookies) {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  // Create owner-only; chmod also tightens files created by older versions.
+  writeFileSync(path, JSON.stringify(cookies, null, 2), { mode: 0o600 });
   chmodSync(path, 0o600);
 }
 
