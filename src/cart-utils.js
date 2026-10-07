@@ -27,6 +27,11 @@ export function quantityForCartUpdate(displayQuantity, measureOptions = {}) {
   }
   const cartQuantity = hasAlternativeUnit ? quantity * conversion : quantity;
   if (!Number.isFinite(cartQuantity)) throw new Error('quantity_semantics_unknown');
+  const minimum = Number(measureOptions.minOrderQuantity);
+  if (quantity > 0 && minimum > 0 && cartQuantity < minimum - 0.0005) {
+    const displayMinimum = hasAlternativeUnit ? minimum / conversion : minimum;
+    throw new Error(`below_minimum_quantity: the minimum is ${Number(displayMinimum.toFixed(3))}`);
+  }
 
   return Number(cartQuantity.toFixed(3)).toString();
 }

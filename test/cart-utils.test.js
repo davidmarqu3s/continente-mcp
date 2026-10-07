@@ -49,3 +49,10 @@ test('converts alternative unit products to primary quantity', () => {
 
   assert.equal(quantityForCartUpdate(12, options), '2.4');
 });
+
+test('rejects quantities below the product minimum, except removal', () => {
+  const options = { hasAlternativeSaleUnit: true, primaryToSecondary: 0.2, minOrderQuantity: 0.6, primaryunit: 'kg', secondaryunit: 'un' };
+  assert.throws(() => quantityForCartUpdate(2, options), /below_minimum_quantity: the minimum is 3/);
+  assert.equal(quantityForCartUpdate(3, options), '0.6');
+  assert.equal(quantityForCartUpdate(0, options), '0');
+});

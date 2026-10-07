@@ -165,6 +165,9 @@ function parseProducts(html, limit = 30) {
     const secondaryText = $el.find('.pwc-tile--price-secondary').first().text().replace(/\s+/g, ' ').trim();
     const unitMatch = secondaryText.match(/(\d+[,.]\d+€)\/([a-zA-Z]+)/);
 
+    // e.g. "Quant. Mínima = 600 gr (3 un)" on products sold by weight
+    const minimumMatch = $el.find('.pwc-tile--quantity').first().text().replace(/\s+/g, ' ').match(/M[ií]nima\s*=\s*(.+?)\s*$/i);
+
     const nameLink = $el.find('a[href*="/produto/"]').filter((_, a) => $(a).text().trim().length > 0).first();
     let name = nameLink.text().replace(/\s+/g, ' ').trim().substring(0, 100);
     if (name.length < 3) return;
@@ -175,7 +178,8 @@ function parseProducts(html, limit = 30) {
       currency: '€',
       product_id: productId,
       url: href.startsWith('http') ? href : CONTINENTE_BASE + href,
-      unit: unitMatch ? `${unitMatch[1]}/${unitMatch[2]}` : null
+      unit: unitMatch ? `${unitMatch[1]}/${unitMatch[2]}` : null,
+      minimum: minimumMatch ? minimumMatch[1] : null
     });
   });
 
@@ -319,6 +323,20 @@ async function addToCart(productId, quantity = 1) {
   await goto(`${CONTINENTE_BASE}/produto/${slug}`, 'domcontentloaded');
   await page.waitForSelector('input.add-to-cart-url', { state: 'attached', timeout: 10000 });
 
+  const measureOptions = await page.evaluate(() => {
+    const options = document.querySelector('.ct-tile-quantity-update[data-measure-options]')?.dataset.measureOptions;
+    try { return options ? JSON.parse(options) : {}; } catch { return null; }
+  });
+  if (!measureOptions) return { success: false, error: 'quantity_semantics_unknown', writeAttempted: false };
+  const numericPid = normalizeCartProductId(productId);
+  const previousQuantity = before.items.find(item => item.id === numericPid)?.qty ?? 0;
+  // Rejects unclear units and basket totals below the product minimum.
+  quantityForCartUpdate(previousQuantity + quantity, measureOptions);
+  // Like the website, weighted products are added at their minimum (-1), then set to the exact quantity.
+  const weighted = Boolean(measureOptions.hasAlternativeSaleUnit || measureOptions.hasConversionRate);
+  if (weighted && previousQuantity > 0) return updateCartItem(numericPid, previousQuantity + quantity);
+  const cartQuantity = weighted ? -1 : quantity;
+
   // Extract numeric PID and Cart-AddProduct URL from page
   const result = await page.evaluate(async (qty) => {
     const pidInput = document.querySelector('input[name="productID"]');
@@ -347,14 +365,15 @@ async function addToCart(productId, quantity = 1) {
     } catch (e) {
       return { success: false, message: e.message };
     }
-  }, quantity);
+  }, cartQuantity);
 
   if (!result.success || result.payload?.error || result.payload?.resources?.customerAuthenticated === false) {
     return { success: false, error: 'cart_add_not_confirmed', writeAttempted: true };
   }
-  const numericPid = normalizeCartProductId(productId);
-  const previousQuantity = before.items.find(item => item.id === numericPid)?.qty ?? 0;
-  return verifyCartQuantity(numericPid, previousQuantity + quantity);
+  if (!weighted) return verifyCartQuantity(numericPid, previousQuantity + quantity);
+  // The add already wrote to the basket, so any failure from here must not be retried.
+  const updated = await updateCartItem(numericPid, previousQuantity + quantity);
+  return updated.success ? updated : { ...updated, writeAttempted: true };
 }
 
 // ─── Order History ────────────────────────────────────────────────────────────
@@ -649,7 +668,8 @@ export class ContinenteServer {
       const fav = preferences?.favorites?.find(f => normalizeCartProductId(f.productId) === normalizeCartProductId(p.product_id));
       const favBadge = fav ? ' ⭐ (favorite)' : '';
       const unitStr = p.unit ? ` (${p.unit})` : '';
-      return `${i + 1}. ${p.name}${favBadge}\n   💰 ${p.price?.toFixed(2) || '?'}€${unitStr}\n   🆔 ${p.product_id}`;
+      const minimumStr = p.minimum ? `\n   ⚖️ Minimum ${p.minimum}` : '';
+      return `${i + 1}. ${p.name}${favBadge}\n   💰 ${p.price?.toFixed(2) || '?'}€${unitStr}${minimumStr}\n   🆔 ${p.product_id}`;
     }).join('\n\n');
   }
 

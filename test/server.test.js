@@ -34,6 +34,8 @@ test('server handler contracts', async (t) => {
   let mutations = 0;
   let mutationPayload = {};
   let postMutationCart;
+  let addMeasureOptions = {};
+  let postedAddQuantity;
   const updateData = {
     updateUrl: 'https://www.continente.pt/Cart-UpdateQuantity',
     uuid: 'test-line', measureOptions: {}, gtmIndex: '1',
@@ -63,7 +65,9 @@ test('server handler contracts', async (t) => {
     },
     async evaluate(_fn, arg) {
       browserOperations++;
+      if (arg === undefined) return addMeasureOptions;
       if (typeof arg === 'number') {
+        postedAddQuantity = arg;
         mutations++;
         payload = postMutationCart;
         return { success: true, status: 200, payload: mutationPayload };
@@ -179,6 +183,24 @@ test('server handler contracts', async (t) => {
       assert.match(result.content[0].text, /2\. Other milk/);
     });
 
+    await t.test('search shows minimum quantities, not package sizes', async () => {
+      html = `
+        <div class="ct-inner-tile-wrap">
+          <a href="/produto/banana-2597619.html">Banana</a>
+          <p class="pwc-tile--quantity"> Quant. Mínima = 600 gr (3 un) </p>
+          <span class="pwc-tile--price-primary">1,19€</span>
+        </div>
+        <div class="ct-inner-tile-wrap">
+          <a href="/produto/melon-7654321.html">Melon</a>
+          <p class="pwc-tile--quantity"> emb. 1,1 kg (1 un) </p>
+          <span class="pwc-tile--price-primary">2,69€</span>
+        </div>`;
+      const result = await server.handle_search('fruit', 2);
+      assert.match(result.content[0].text, /Banana[^]*⚖️ Minimum 600 gr \(3 un\)/);
+      assert.doesNotMatch(result.content[0].text, /Melon[^]*Minimum/);
+      assert.equal(result.structuredContent.products.find(p => p.name === 'Banana').minimum, '600 gr (3 un)');
+    });
+
     await t.test('failed favorites refresh preserves the cached favorites', async () => {
       const prefsFile = join(stateDir, 'preferences.json');
       const original = readFileSync(prefsFile, 'utf8');
@@ -250,6 +272,36 @@ test('server handler contracts', async (t) => {
         assert.equal(result.isError === true, finalQuantity !== 3, JSON.stringify(result));
         assert.equal(mutations, before + 1);
       }
+    });
+
+    await t.test('weighted products are added at the minimum, then set to the exact quantity', async () => {
+      addMeasureOptions = { hasConversionRate: true, hasAlternativeSaleUnit: true, primaryToSecondary: 0.2,
+        unitConversionRate: 0.2, minOrderQuantity: 0.6, stepQuantity: 0.2, primaryunit: 'kg', secondaryunit: 'un' };
+      try {
+        payload = cartWithQuantity(0);
+        postMutationCart = cartWithQuantity(4);
+        mutationPayload = postMutationCart;
+        const before = mutations;
+        const result = await server.callTool('add_to_cart', { product_id: 'milk-1234567', quantity: 4 });
+        assert.notEqual(result.isError, true, JSON.stringify(result));
+        assert.equal(postedAddQuantity, -1);
+        assert.equal(mutations, before + 2);
+
+        const beforeRejected = mutations;
+        payload = cartWithQuantity(0);
+        const tooFew = await server.callTool('add_to_cart', { product_id: 'milk-1234567', quantity: 1 });
+        assert.equal(tooFew.isError, true);
+        assert.match(tooFew.content[0].text, /below_minimum_quantity: the minimum is 3/);
+        assert.equal(mutations, beforeRejected);
+
+        // The minimum applies to the basket total, so one more is fine once some are in the basket.
+        payload = cartWithQuantity(4);
+        postMutationCart = cartWithQuantity(5);
+        postedAddQuantity = undefined;
+        const oneMore = await server.callTool('add_to_cart', { product_id: 'milk-1234567', quantity: 1 });
+        assert.notEqual(oneMore.isError, true, JSON.stringify(oneMore));
+        assert.equal(postedAddQuantity, undefined);
+      } finally { addMeasureOptions = {}; }
     });
 
     await t.test('missing authentication after a write fails without retrying the mutation', async (mutationTest) => {
