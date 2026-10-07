@@ -183,6 +183,24 @@ test('server handler contracts', async (t) => {
       assert.match(result.content[0].text, /2\. Other milk/);
     });
 
+    await t.test('search shows minimum quantities, not package sizes', async () => {
+      html = `
+        <div class="ct-inner-tile-wrap">
+          <a href="/produto/banana-2597619.html">Banana</a>
+          <p class="pwc-tile--quantity"> Quant. Mínima = 600 gr (3 un) </p>
+          <span class="pwc-tile--price-primary">1,19€</span>
+        </div>
+        <div class="ct-inner-tile-wrap">
+          <a href="/produto/melon-7654321.html">Melon</a>
+          <p class="pwc-tile--quantity"> emb. 1,1 kg (1 un) </p>
+          <span class="pwc-tile--price-primary">2,69€</span>
+        </div>`;
+      const result = await server.handle_search('fruit', 2);
+      assert.match(result.content[0].text, /Banana[^]*⚖️ Minimum 600 gr \(3 un\)/);
+      assert.doesNotMatch(result.content[0].text, /Melon[^]*Minimum/);
+      assert.equal(result.structuredContent.products.find(p => p.name === 'Banana').minimum, '600 gr (3 un)');
+    });
+
     await t.test('failed favorites refresh preserves the cached favorites', async () => {
       const prefsFile = join(stateDir, 'preferences.json');
       const original = readFileSync(prefsFile, 'utf8');
