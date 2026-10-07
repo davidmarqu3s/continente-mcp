@@ -42,7 +42,7 @@ Call `add_to_cart` with `product_id`. Default quantity is 1 unless specified (e.
 
 `add_to_cart` and `update_cart_item` both check the basket afterwards and only report success when it holds the requested quantity. Products sold by weight (e.g. bananas) are counted in units, like on the website.
 
-- `below_minimum_quantity` — the product has a minimum (the error says what it is). Nothing was added; ask whether to add the minimum.
+- `below_minimum_quantity` — the product has a minimum, shown as ⚖️ in search results and in the error. Nothing was added; ask whether to add the minimum instead.
 - `cart_add_not_confirmed` or `cart_quantity_not_confirmed` — the change may still have happened. Call `get_cart`, never repeat `add_to_cart`, and correct with `update_cart_item` if needed.
 
 ## Output format
