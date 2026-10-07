@@ -118,4 +118,5 @@ test('unexpected nonempty basket objects remain errors even on MiniCartShow', ()
 test('weighted cart updates reject incomplete conversion metadata', () => {
   assert.throws(() => quantityForCartUpdate(1, { hasAlternativeSaleUnit: true }), /quantity_semantics_unknown/);
   assert.throws(() => quantityForCartUpdate(1, { primaryunit: 'kg', secondaryunit: 'un' }), /quantity_semantics_unknown/);
+  assert.throws(() => quantityForCartUpdate(1, { primaryunit: 'un', secondaryunit: 'kg', selectedunit: 'secondary' }), /quantity_semantics_unknown/);
 });

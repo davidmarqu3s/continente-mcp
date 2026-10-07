@@ -20,6 +20,23 @@ test('keeps unit products as direct quantities', () => {
   assert.equal(quantityForCartUpdate(3, options), '3');
 });
 
+test('keeps unit products priced per kg as direct quantities', () => {
+  // Live cart metadata for an ordinary unit product: kg is only the price reference unit.
+  const options = {
+    hasConversionRate: false,
+    hasAlternativeSaleUnit: false,
+    unitConversionRate: 0,
+    minOrderQuantity: 1,
+    stepQuantity: 1,
+    primaryunit: 'un',
+    secondaryunit: 'kg',
+    selectedunit: 'primary',
+    maxNumberOfUnitsPerSale: 99
+  };
+
+  assert.equal(quantityForCartUpdate(2, options), '2');
+});
+
 test('converts alternative unit products to primary quantity', () => {
   const options = {
     hasConversionRate: true,
