@@ -20,7 +20,7 @@ Requires Node.js 20.18.1 or later. Install the browser the server uses (on Linux
 npx -y -p continente-mcp playwright install chromium
 ```
 
-For favourites, basket and order history, create `~/.continente/credentials.env` (owner-only, `chmod 600`) with your Continente login. Search works without it.
+For favourites, basket and order history, create `~/.continente/credentials.env` with your Continente login and make it private to your user (`chmod 600` on macOS/Linux). Search works without it.
 
 ```
 CONTINENTE_EMAIL=you@example.com
