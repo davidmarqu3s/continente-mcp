@@ -8,7 +8,7 @@
     "continente-mcp": "src/index.js"
   },
   "engines": {
-    "node": ">=20.18.1"
+    "node": ">=22"
   },
   "scripts": {
     "start": "node src/index.js",
