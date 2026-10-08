@@ -16,7 +16,7 @@ Do not bump versions or edit CHANGELOG.md in ordinary PRs. Release when a useful
 ## Making a release
 
 1. Choose the version from the changes since the last tag (`git log vX.Y.Z..main`): patch for fixes, minor for additions, major for breaking changes. Use a prerelease such as `4.1.0-rc.1` for a risky candidate.
-2. On a branch, run `npm version <version> --no-git-tag-version` and add a `## <version>` section to the top of CHANGELOG.md. `npm run check:release` confirms the versions and notes match.
+2. On a branch, run `npm version <version> --no-git-tag-version` and add a `## <version>` section to the top of CHANGELOG.md: a `### Changelog` heading and one numbered list of `**User outcome**: effect` items (see the 4.1.0 entry). `npm run check:release` confirms the versions and notes match.
 3. Open a `chore: release <version>` PR. Confirm all five platform checks pass.
 4. Run live account verification appropriate to the changes. CI uses isolated state and a real Chromium startup; it does not verify the signed-in storefront. Never place an order or pay as a test.
 5. Squash merge, then tag the merge commit and push the tag:
@@ -27,7 +27,7 @@ Do not bump versions or edit CHANGELOG.md in ordinary PRs. Release when a useful
    git push origin v<version>
    ```
 
-6. The tag runs `release.yml`: it reruns the checks, validates the tag, version, lockfile and notes, publishes to npm (prereleases to `next`, stable versions to `latest`), then creates the GitHub release from the CHANGELOG section. Verify the workflow succeeded and the version is on npm. Publishing does not update existing installations; update pinned deployments separately.
+6. The tag runs `release.yml`: it reruns the checks, validates the tag, version, lockfile and notes, publishes to npm (prereleases to `next`, stable versions to `latest`), then creates the GitHub release from `.github/release-header.md` plus the CHANGELOG section. Verify the workflow succeeded and the version is on npm. Publishing does not update existing installations; update pinned deployments separately.
 
 ## Publisher setup
 
