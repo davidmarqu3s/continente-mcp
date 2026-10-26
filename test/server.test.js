@@ -273,6 +273,47 @@ test('server handler contracts', async (t) => {
       }
     });
 
+    await t.test('search and favorites load while background requests remain active', async () => {
+      html = '<div class="ct-inner-tile-wrap"><a href="/produto/milk-1234567.html">Milk fixture</a><span class="pwc-tile--price-primary">1,20€</span></div>';
+      backgroundRequests = true;
+      try {
+        const search = await server.callTool('search_products', { query: 'milk', limit: 1 });
+        assert.notEqual(search.isError, true, JSON.stringify(search));
+        assert.equal(search.structuredContent.products[0].name, 'Milk fixture');
+
+        const favorites = await server.callTool('refresh_favorites', {});
+        assert.notEqual(favorites.isError, true, JSON.stringify(favorites));
+        const saved = JSON.parse(readFileSync(join(stateDir, 'preferences.json'), 'utf8'));
+        assert.equal(saved.favorites[0].name, 'Milk fixture');
+      } finally { backgroundRequests = false; }
+    });
+
+    await t.test('order history and detail lines load while background requests remain active', async (orderTest) => {
+      const detailUrl = 'https://www.continente.pt/conta/detalhe-encomenda/?orderID=fixture';
+      const readings = [
+        '123456789_001\n26 Outubro 2026',
+        [detailUrl],
+        [{ name: 'Milk fixture', qtyText: '2 un' }],
+      ];
+      const evaluate = orderTest.mock.method(page, 'evaluate', async () => {
+        assert.ok(readings.length, 'unexpected extra order page read');
+        return readings.shift();
+      });
+      backgroundRequests = true;
+      try {
+        const result = await server.callTool('get_order_history', { limit: 1 });
+        assert.notEqual(result.isError, true, JSON.stringify(result));
+        assert.match(result.content[0].text, /26 Outubro 2026/);
+        assert.match(result.content[0].text, /2x Milk fixture/);
+        assert.doesNotMatch(result.content[0].text, /items could not be read/);
+        assert.equal(readings.length, 0);
+        assert.equal(currentUrl, detailUrl);
+      } finally {
+        backgroundRequests = false;
+        evaluate.mock.restore();
+      }
+    });
+
     await t.test('adding a product does not wait for background requests to become idle', async () => {
       payload = { action: 'Cart-MiniCartShow', basket: {}, resources: { customerAuthenticated: true } };
       postMutationCart = cartWithQuantity(1);

@@ -24,8 +24,13 @@ test('refresh verifies the same custom cookie file that automatic login writes',
   const cookieFile = join(dir, 'custom', 'session.json');
   const frame = {
     url: () => 'https://login.continente.pt/user-register',
-    waitForSelector: async () => ({ fill: async () => {} }),
-    $: async () => ({ click: async () => {} }),
+    locator: () => ({
+      first() { return this; },
+      fill: async () => {},
+      waitFor: async () => {},
+      count: async () => 0,
+    }),
+    getByRole: () => ({ click: async () => {} }),
   };
   const context = {
     cookies: async () => [],
@@ -33,7 +38,10 @@ test('refresh verifies the same custom cookie file that automatic login writes',
     newPage: async () => ({
       goto: async () => ({ ok: () => true }),
       url: () => 'https://www.continente.pt/conta/encomendas/',
-      getByRole: () => ({ click: async () => {} }),
+      getByRole: () => ({
+        isVisible: async () => false,
+        waitFor: async () => {},
+      }),
       frames: () => [frame],
       waitForTimeout: async () => {},
       waitForLoadState: async () => {},
