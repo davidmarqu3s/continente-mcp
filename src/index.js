@@ -89,7 +89,7 @@ async function ensureBrowser() {
   return browser;
 }
 
-async function goto(url, wait = 'networkidle') {
+async function goto(url, wait = 'domcontentloaded') {
   await ensureBrowser();
   const response = await page.goto(url, { waitUntil: wait, timeout: 20000 });
   if (!response?.ok()) throw new Error(`Continente page returned HTTP ${response?.status() ?? 'unknown'}`);
@@ -455,7 +455,7 @@ async function getOrderHistory(limit = 5) {
 }
 
 async function getOrderProducts(orderDetailUrl) {
-  const response = await page.goto(orderDetailUrl, { waitUntil: 'networkidle', timeout: 20000 });
+  const response = await page.goto(orderDetailUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
   if (!response?.ok() || page.url().includes('/login')) throw new Error('order_detail_unavailable');
 
   const products = await page.evaluate(() => {

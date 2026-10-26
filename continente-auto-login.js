@@ -100,33 +100,55 @@ export async function isLoggedIn(page) {
   return payload?.resources?.customerAuthenticated === true;
 }
 
-async function fillFirst(page, selectors, value, label) {
-  for (const selector of selectors) {
-    const input = await page.waitForSelector(selector, { timeout: 3000 }).catch(() => null);
-    if (input) {
-      await input.fill(value);
+const EMAIL_INPUTS = '#userNameCC:visible, input[name="userNameCC"]:visible, input[type="email"]:visible, input[name="email"]:visible, input[name="username"]:visible, input[type="text"]:visible';
+const PASSWORD_INPUTS = '#password_input:visible, input[name="password_input"]:visible, input[type="password"]:visible, input[name="password"]:visible';
+const VERIFICATION_INPUT = 'input[id^="altcha_checkbox_"]:visible';
+
+async function submitLoginStep(frame) {
+  await frame.getByRole('button', { name: /^(Avançar|Continuar|Entrar|Login)$/i })
+    .click({ timeout: 15000 });
+}
+
+export async function completeLoginForm(frame, { email, password, log: logger = log }) {
+  logger('Entering email.');
+  await frame.locator(EMAIL_INPUTS).first().fill(email, { timeout: 15000 });
+  await submitLoginStep(frame);
+
+  // Continente may ask for its native verification before showing the password.
+  // Wait for either stage: the verification widget is inserted asynchronously.
+  await frame.locator(`${PASSWORD_INPUTS}, ${VERIFICATION_INPUT}`).first()
+    .waitFor({ state: 'visible', timeout: 15000 });
+  const verification = frame.locator(VERIFICATION_INPUT);
+  if (await verification.count()) {
+    logger('Completing login verification.');
+    await verification.click({ timeout: 10000 });
+    await frame.getByText(/^(Verificado|Verified)$/i)
+      .waitFor({ state: 'visible', timeout: 60000 });
+    await submitLoginStep(frame);
+  }
+
+  logger('Entering password.');
+  await frame.locator(PASSWORD_INPUTS).first().fill(password, { timeout: 15000 });
+  await submitLoginStep(frame);
+}
+
+export async function acceptCookies(page) {
+  const button = page.getByRole('button', { name: /PERMITIR TODOS|Permitir todos/i });
+  if (!await button.isVisible()) {
+    await button.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
+    if (!await button.isVisible()) return;
+  }
+  // The banner can render before its click handler is ready. Confirm dismissal
+  // before interacting with the iframe, which the banner otherwise covers.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await button.click({ timeout: 5000 });
+    try {
+      await button.waitFor({ state: 'hidden', timeout: 5000 });
       return;
+    } catch (error) {
+      if (attempt === 2) throw new Error('Could not dismiss the Continente cookie banner');
     }
   }
-  throw new Error(`Could not find ${label} input`);
-}
-
-async function clickFirst(page, selectors) {
-  for (const selector of selectors) {
-    const button = await page.$(selector);
-    if (button) {
-      await button.click();
-      return true;
-    }
-  }
-  await page.keyboard.press('Enter');
-  return false;
-}
-
-async function acceptCookies(page) {
-  await page.getByRole('button', { name: /PERMITIR TODOS|Permitir todos/i })
-    .click({ timeout: 5000 })
-    .catch(() => {});
 }
 
 async function findLoginFrame(page) {
@@ -172,37 +194,7 @@ export async function autoLogin({
     await acceptCookies(page);
     const loginFrame = await findLoginFrame(page);
 
-    logger('Entering email.');
-    await fillFirst(loginFrame, [
-      '#userNameCC',
-      'input[name="userNameCC"]',
-      'input[type="email"]',
-      'input[name="email"]',
-      'input[name="username"]',
-      'input[type="text"]',
-    ], email, 'email');
-
-    await clickFirst(loginFrame, [
-      'button[type="submit"]',
-      'button:has-text("Avançar")',
-      'button:has-text("Continuar")',
-    ]);
-
-    logger('Entering password.');
-    await page.waitForTimeout(1500);
-    await fillFirst(loginFrame, [
-      '#password_input',
-      'input[name="password_input"]',
-      'input[type="password"]',
-      'input[name="password"]',
-    ], password, 'password');
-
-    await clickFirst(loginFrame, [
-      'button[type="submit"]',
-      'button:has-text("Avançar")',
-      'button:has-text("Entrar")',
-      'button:has-text("Login")',
-    ]);
+    await completeLoginForm(loginFrame, { email, password, log: logger });
 
     await page.waitForTimeout(4000);
     await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
