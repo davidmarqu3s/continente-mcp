@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.1.1
+
+### Changelog
+
+1. **Automatic login restored**: Login completes Continente’s verification step before continuing to the password screen, so expired sessions can sign in again.
+2. **Cookie banners no longer block login**: Login confirms the consent banner has closed before interacting with the sign-in form.
+3. **Fewer page-loading timeouts**: Search, favourites, basket pages and order history load without waiting for background network requests to stop.
+
 ## 4.1.0
 
 ### Changelog
