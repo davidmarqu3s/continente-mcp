@@ -14,7 +14,7 @@ Let your AI assistant search Continente.pt and fill your basket with the product
 
 ## Install
 
-Requires Node.js 20.18.1 or later. Install the browser the server uses (on Linux, add `--with-deps`):
+Requires Node.js 22 or later. Install the browser the server uses (on Linux, add `--with-deps`):
 
 ```bash
 npx -y -p continente-mcp playwright install chromium
