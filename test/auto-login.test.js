@@ -90,6 +90,26 @@ test('login verification rejects an error page and guest cart response', async (
   assert.equal(await isLoggedIn(page), false);
 });
 
+test('login verification waits out a late post-login redirect', async () => {
+  const { isLoggedIn } = await import('../continente-auto-login.js');
+  let calls = 0;
+  const page = {
+    goto: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('page.goto: Navigation to "https://www.continente.pt/conta/encomendas/" is interrupted by another navigation to "https://www.continente.pt/"');
+      return { ok: () => true };
+    },
+    waitForLoadState: async () => {},
+    waitForTimeout: async () => {},
+    url: () => 'https://www.continente.pt/conta/encomendas/',
+    context: () => ({ request: { get: async () => ({ ok: () => true, json: async () => ({ resources: { customerAuthenticated: true } }) }) } })
+  };
+  assert.equal(await isLoggedIn(page), true);
+  assert.equal(calls, 2);
+  page.goto = async () => { throw new Error('net::ERR_TIMED_OUT'); };
+  await assert.rejects(isLoggedIn(page), /ERR_TIMED_OUT/);
+});
+
 test('reusing loaded settings keeps the original private credentials file', async (t) => {
   const { mkdirSync, rmSync } = await import('node:fs');
   const { resolveStatePaths } = await import('../continente-auto-login.js');
