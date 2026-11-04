@@ -88,8 +88,23 @@ export function getCredentialStatus(env = DEFAULT_ENV) {
   };
 }
 
+async function gotoAfterRedirects(page, url, attempts = 3) {
+  // After the password step the site may still be redirecting; a navigation of
+  // our own then fails with "interrupted by another navigation". Let the site's
+  // navigation settle and try again instead of failing the whole login.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    } catch (error) {
+      if (attempt >= attempts || !/interrupted by another navigation/i.test(String(error?.message))) throw error;
+      await page.waitForLoadState?.('domcontentloaded', { timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(2000);
+    }
+  }
+}
+
 export async function isLoggedIn(page) {
-  const response = await page.goto(CONTINENTE_CHECK_URL, { waitUntil: 'domcontentloaded', timeout: 20000 });
+  const response = await gotoAfterRedirects(page, CONTINENTE_CHECK_URL);
   if (!response?.ok() || page.url().includes('/login')) return false;
   const session = await page.context().request.get(
     'https://www.continente.pt/on/demandware.store/Sites-continente-Site/default/Cart-MiniCartShow',
