@@ -12,7 +12,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "setup": "playwright install chromium --with-deps",
+    "setup": "patchright install chromium --with-deps",
     "test": "node --test",
     "check:release": "node scripts/check-release.js"
   },
@@ -48,6 +48,6 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
     "cheerio": "^1.2.0",
-    "playwright": "^1.59.1"
+    "patchright": "^1.64.3"
   }
 }

@@ -3,11 +3,63 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'f
 import { dirname, join } from 'path';
 import { homedir } from 'os';
 import { pathToFileURL } from 'node:url';
-import { chromium } from 'playwright';
+import { chromium } from 'patchright';
 
 const CONTINENTE_LOGIN_URL = 'https://www.continente.pt/login/';
 const CONTINENTE_CHECK_URL = 'https://www.continente.pt/conta/encomendas/';
 const DEFAULT_ENV = process.env;
+
+// Patchright is a drop-in Playwright fork that removes the usual automation
+// leaks (navigator.webdriver, Runtime.enable, console CDP, etc.).
+//
+// - Prefers the installed Google Chrome (CONTINENTE_BROWSER_CHANNEL, default
+//   "chrome"); falls back to the bundled Chromium when it is missing.
+// - Never sends a hard-coded user agent: one that doesn't match the real
+//   browser version is an easy bot signal. Headless mode only drops the
+//   "HeadlessChrome" marker and keeps the real version.
+
+const headlessBrowsers = new WeakSet();
+
+export async function launchBrowser({ headless = true, env = process.env } = {}) {
+  const channel = env.CONTINENTE_BROWSER_CHANNEL || 'chrome';
+  let browser = null;
+  if (channel !== 'chromium') {
+    try {
+      browser = await chromium.launch({ headless, channel });
+    } catch (error) {
+      console.error(`[browser] "${channel}" is not available, using the bundled Chromium: ${String(error?.message).split('\n')[0]}`);
+    }
+  }
+  browser ??= await chromium.launch({ headless });
+  if (headless) headlessBrowsers.add(browser);
+  return browser;
+}
+
+const PLATFORM_TOKENS = {
+  darwin: 'Macintosh; Intel Mac OS X 10_15_7',
+  win32: 'Windows NT 10.0; Win64; x64',
+  linux: 'X11; Linux x86_64',
+};
+
+// Same format as Chrome's reduced user agent: only the major version is real.
+export function headlessUserAgent(version, platform = process.platform) {
+  const major = String(version ?? '').match(/^(\d+)\./)?.[1];
+  if (!major) return null;
+  const os = PLATFORM_TOKENS[platform] ?? PLATFORM_TOKENS.linux;
+  return `Mozilla/5.0 (${os}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
+}
+
+export function newContext(browser, options = {}) {
+  const userAgent = headlessBrowsers.has(browser) && typeof browser.version === 'function'
+    ? headlessUserAgent(browser.version())
+    : null;
+  return browser.newContext({
+    locale: 'pt-PT',
+    timezoneId: 'Europe/Lisbon',
+    ...(userAgent ? { userAgent } : {}),
+    ...options,
+  });
+}
 
 function log(message) {
   console.error(`[continente-auto-login] ${message}`);
@@ -193,15 +245,13 @@ export async function autoLogin({
     return { success: false, error: 'missing_credentials' };
   }
 
-  const browser = await chromium.launch({
+  const browser = await launchBrowser({
     headless: mergedEnv.CONTINENTE_LOGIN_HEADLESS !== 'false',
+    env: mergedEnv,
   });
 
   try {
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-      locale: 'pt-PT',
-    });
+    const context = await newContext(browser);
     const page = await context.newPage();
 
     logger('Opening login page.');

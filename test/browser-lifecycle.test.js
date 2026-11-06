@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { chromium } from 'playwright';
+import { chromium } from 'patchright';
 
 test('a crashed browser is replaced on the next call', async (t) => {
   const stateDir = mkdtempSync(join(tmpdir(), 'continente-lifecycle-test-'));
