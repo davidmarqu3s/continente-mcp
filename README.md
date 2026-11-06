@@ -50,6 +50,7 @@ Ask your assistant things like "add milk, eggs and bread to my Continente basket
 | `get_cart` | Read the basket |
 | `add_to_cart` / `update_cart_item` | Add a product / set its quantity (zero removes it) |
 | `get_order_history` / `get_most_bought` | Read recent orders / your most-bought products |
+| `login` | Sign in now with the saved credentials (other tools already retry once on their own) |
 | `close_session` | Close the browser session |
 
 ## More
