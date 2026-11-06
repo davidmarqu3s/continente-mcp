@@ -1,7 +1,7 @@
 # Troubleshooting
 
 - **"Not logged in"** — check `CONTINENTE_EMAIL` and `CONTINENTE_PASSWORD` in `~/.continente/credentials.env`. To watch the login, set `CONTINENTE_LOGIN_HEADLESS=false` and run `node continente-auto-login.js` from a source checkout.
-- **Browser not found** — run `npx -y -p continente-mcp playwright install chromium` (add `--with-deps` on Linux), or `npm run setup` in a source checkout.
+- **Browser not found** — run `npx -y -p continente-mcp patchright install chromium` (add `--with-deps` on Linux), or `npm run setup` in a source checkout. Installing Google Chrome also works and is preferred; set `CONTINENTE_BROWSER_CHANNEL=chromium` to always use the bundled browser.
 - **Search ignores your favourites** — run `refresh_favorites`; catalogue search still works without them.
 - **`quantity_semantics_unknown`** — Continente's unit data for that product is unclear, so the server refused to guess the quantity. Nothing was changed; set it on Continente.pt.
 - **`below_minimum_quantity`** — the product has a minimum order (the error says what it is, e.g. 3 bananas). Nothing was added.

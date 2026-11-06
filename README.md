@@ -14,10 +14,10 @@ Let your AI assistant search Continente.pt and fill your basket with the product
 
 ## Install
 
-Requires Node.js 20.18.1 or later. Install the browser the server uses (on Linux, add `--with-deps`):
+Requires Node.js 20.18.1 or later. The server drives the browser with [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-nodejs), a Playwright fork that hides automation signals. It uses your installed Google Chrome when there is one, and otherwise a bundled Chromium. Install the bundled browser as a fallback (on Linux, add `--with-deps`):
 
 ```bash
-npx -y -p continente-mcp playwright install chromium
+npx -y -p continente-mcp patchright install chromium
 ```
 
 For favourites, basket and order history, create `~/.continente/credentials.env` with your Continente login and make it private to your user (`chmod 600` on macOS/Linux). Search works without it.

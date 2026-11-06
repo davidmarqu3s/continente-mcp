@@ -17,7 +17,7 @@ test('refresh verifies the same custom cookie file that automatic login writes',
   const { mkdtempSync, existsSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
-  const { chromium } = await import('playwright');
+  const { chromium } = await import('patchright');
   const { refreshAuthCookies } = await import('../src/auth-session.js');
   const dir = mkdtempSync(join(tmpdir(), 'continente-auth-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

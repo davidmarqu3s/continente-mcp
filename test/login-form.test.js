@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chromium } from 'playwright';
+import { chromium } from 'patchright';
 import { acceptCookies, completeLoginForm } from '../continente-auto-login.js';
+
+// Patchright evaluates in an isolated world by default; the last argument
+// (isolatedContext = false) reads the fixture's page globals.
 
 // Exercise browser visibility, form submission and delayed stage changes without
 // contacting Continente or loading account credentials.
@@ -80,7 +83,7 @@ for (const challenge of [false, true]) {
       log: () => {},
     });
 
-    assert.deepEqual(await page.evaluate(() => window.loginState), {
+    assert.deepEqual(await page.evaluate(() => window.loginState, undefined, undefined, false), {
       emailSubmissions: challenge ? 2 : 1,
       passwordSubmissions: 1,
       helpSubmissions: 0,
@@ -110,6 +113,6 @@ test('cookie consent retries a click that did not dismiss the banner', async (t)
 
   await acceptCookies(page);
 
-  assert.equal(await page.evaluate(() => window.consentClicks), 2);
+  assert.equal(await page.evaluate(() => window.consentClicks, undefined, undefined, false), 2);
   assert.equal(await page.locator('#cookie-banner').count(), 0);
 });

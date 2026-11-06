@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { setImmediate } from 'node:timers/promises';
-import { chromium } from 'playwright';
+import { chromium } from 'patchright';
 
 // Exercise actual handlers with browser I/O replaced, keeping all account state
 // and credentials isolated from the machine running the tests.
