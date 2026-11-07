@@ -25,6 +25,7 @@ test('a crashed browser is replaced on the next call', async (t) => {
   t.mock.method(chromium, 'launch', async () => {
     launches++;
     return {
+      version: () => '147.0.7727.15',
       on(event, handler) { if (event === 'disconnected') disconnect = handler; },
       async newContext() { return { async addCookies() {}, async newPage() { return page; }, async close() {} }; },
       async close() {},

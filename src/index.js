@@ -9,20 +9,12 @@ import { chmodSync, existsSync, readFileSync, writeFileSync, mkdirSync, statSync
 import { normalizeCookies } from './utils.js';
 import { normalizeCartProductId, parseOrderQuantity, quantityForCartUpdate, summarizeCartState, tallyMostBought } from './cart-utils.js';
 import { loginNow, refreshAuthCookies, resolveStatePaths } from './auth-session.js';
+import { newBrowserContext } from '../continente-auto-login.js';
 import { createQueue, normalizeFavoriteId, retryAuthentication, validateToolInput } from './reliability.js';
 
 const CONTINENTE_BASE = 'https://www.continente.pt';
 const { stateDir: STATE_DIR, cookieFile: COOKIE_FILE } = resolveStatePaths();
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
-
-function getPlatformUserAgent() {
-  if (process.platform === 'win32') {
-    return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
-  } else if (process.platform === 'linux') {
-    return 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
-  }
-  return 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
-}
 
 // ─── Browser / Session ───────────────────────────────────────────────────────
 
@@ -64,10 +56,7 @@ async function ensureBrowser() {
   }
 
   if (!context) {
-    context = await browser.newContext({
-      userAgent: getPlatformUserAgent(),
-      locale: 'pt-PT'
-    });
+    context = await newBrowserContext(browser);
 
     // Load cookies from file
     if (existsSync(cookieFile)) {
