@@ -48,7 +48,7 @@ test('refresh verifies the same custom cookie file that automatic login writes',
       context: () => context,
     }),
   };
-  t.mock.method(chromium, 'launch', async () => ({ newContext: async () => context, close: async () => {} }));
+  t.mock.method(chromium, 'launch', async () => ({ version: () => '147.0.7727.15', newContext: async () => context, close: async () => {} }));
   const result = await refreshAuthCookies({
     stateDir: join(dir, 'state'),
     env: { CONTINENTE_EMAIL: 'user@example.com', CONTINENTE_PASSWORD: 'secret', CONTINENTE_COOKIES_PATH: cookieFile },

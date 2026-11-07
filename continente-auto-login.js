@@ -9,6 +9,31 @@ const CONTINENTE_LOGIN_URL = 'https://www.continente.pt/login/';
 const CONTINENTE_CHECK_URL = 'https://www.continente.pt/conta/encomendas/';
 const DEFAULT_ENV = process.env;
 
+const PLATFORM_TOKENS = {
+  darwin: 'Macintosh; Intel Mac OS X 10_15_7',
+  win32: 'Windows NT 10.0; Win64; x64',
+  linux: 'X11; Linux x86_64',
+};
+
+// Chrome's reduced user agent for the browser actually running, without the
+// "HeadlessChrome" marker. Only the major version is real, as in Chrome itself.
+export function browserUserAgent(version, platform = process.platform) {
+  const major = String(version ?? '').match(/^(\d+)\./)?.[1];
+  if (!major) return null;
+  const os = PLATFORM_TOKENS[platform] ?? PLATFORM_TOKENS.linux;
+  return `Mozilla/5.0 (${os}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
+}
+
+// Headed browsers already send a real user agent; headless ones only need the marker removed.
+export function newBrowserContext(browser, { headless = true } = {}) {
+  const userAgent = headless ? browserUserAgent(browser.version()) : null;
+  return browser.newContext({
+    locale: 'pt-PT',
+    timezoneId: 'Europe/Lisbon',
+    ...(userAgent ? { userAgent } : {}),
+  });
+}
+
 function log(message) {
   console.error(`[continente-auto-login] ${message}`);
 }
@@ -193,15 +218,11 @@ export async function autoLogin({
     return { success: false, error: 'missing_credentials' };
   }
 
-  const browser = await chromium.launch({
-    headless: mergedEnv.CONTINENTE_LOGIN_HEADLESS !== 'false',
-  });
+  const headless = mergedEnv.CONTINENTE_LOGIN_HEADLESS !== 'false';
+  const browser = await chromium.launch({ headless });
 
   try {
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-      locale: 'pt-PT',
-    });
+    const context = await newBrowserContext(browser, { headless });
     const page = await context.newPage();
 
     logger('Opening login page.');

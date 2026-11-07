@@ -101,6 +101,7 @@ test('server handler contracts', async (t) => {
     },
   };
   t.mock.method(chromium, 'launch', async () => ({
+    version: () => '147.0.7727.15',
     on() {},
     async newContext() { return context; },
     async close() {},
