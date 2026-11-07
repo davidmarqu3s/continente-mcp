@@ -1,5 +1,17 @@
 # Changelog
 
+## 4.2.0
+
+### Changelog
+
+1. **Sign in on request**: A new `login` tool lets your assistant sign in again when a tool still reports "Not logged in" after its automatic retry, and explains why when it can't, such as missing credentials.
+2. **Login survives the post-login redirect**: Signing in no longer fails when Continente is still redirecting after the password step.
+3. **Browser matches the real one**: The browser now reports its actual Chrome version instead of an outdated Chrome 121, and uses a Portuguese locale and the Lisbon time zone.
+
+### Thanks
+
+Thanks to Kylian Mallet for the login tool and the browser identity idea.
+
 ## 4.1.1
 
 ### Changelog
