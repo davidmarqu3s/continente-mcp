@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { chmodSync, existsSync, readFileSync, writeFileSync, mkdirSync, statSync, realpathSync } from 'fs';
 import { normalizeCookies } from './utils.js';
 import { normalizeCartProductId, parseOrderQuantity, quantityForCartUpdate, summarizeCartState, tallyMostBought } from './cart-utils.js';
-import { refreshAuthCookies, resolveStatePaths } from './auth-session.js';
+import { loginNow, refreshAuthCookies, resolveStatePaths } from './auth-session.js';
 import { createQueue, normalizeFavoriteId, retryAuthentication, validateToolInput } from './reliability.js';
 
 const CONTINENTE_BASE = 'https://www.continente.pt';
@@ -643,6 +643,11 @@ export class ContinenteServer {
           }
         },
         {
+          name: 'login',
+          description: 'Sign in to Continente now with the saved credentials and refresh the session cookies. Other tools already retry login once on their own; call this when one still reports "Not logged in", then retry that tool.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
           name: 'close_session',
           description: 'Close the browser session. Call when done to free resources.',
           inputSchema: { type: 'object', properties: {} }
@@ -679,6 +684,8 @@ export class ContinenteServer {
             return await this.handle_order_history(args.limit || 5);
           case 'get_most_bought':
             return await this.handle_most_bought(args.limit || 10);
+          case 'login':
+            return await this.handle_login();
           case 'close_session':
             await closeBrowser();
             return { content: [{ type: 'text', text: 'Session closed.' }] };
@@ -698,6 +705,21 @@ export class ContinenteServer {
       const minimumStr = p.minimum ? `\n   ⚖️ Minimum ${p.minimum}` : '';
       return `${i + 1}. ${p.name}${favBadge}\n   💰 ${p.price?.toFixed(2) || '?'}€${unitStr}${minimumStr}\n   🆔 ${p.product_id}`;
     }).join('\n\n');
+  }
+
+  async handle_login() {
+    const result = await loginNow({
+      stateDir: STATE_DIR,
+      closeBrowser,
+      log: (message) => console.error(message),
+    });
+    if (result.success) {
+      return { structuredContent: result, content: [{ type: 'text', text: '✅ Logged in to Continente. Retry the tool that failed.' }] };
+    }
+    const text = result.error === 'missing_credentials'
+      ? NOT_LOGGED_IN
+      : `Login failed: ${result.error}. Check CONTINENTE_EMAIL and CONTINENTE_PASSWORD in ~/.continente/credentials.env. To watch the login, run node continente-auto-login.js with CONTINENTE_LOGIN_HEADLESS=false.`;
+    return { structuredContent: result, content: [{ type: 'text', text }], isError: true };
   }
 
   async handle_search(query, limit) {

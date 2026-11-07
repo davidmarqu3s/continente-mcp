@@ -58,6 +58,7 @@ After all items are processed, print a compact summary:
 
 ## Error handling
 
+- "Not logged in" → call `login` once, then retry the failed tool. If `login` fails, stop and show its message; do not call it again in the same run
 - No search results → report as not found, skip, continue with others
 - `add_to_cart` fails → handle the errors above, otherwise report the error and move on
 - Never stop the whole run because one item failed
