@@ -10,7 +10,7 @@
 
 ### Thanks
 
-Thanks to Kylian Mallet for the login tool and the browser identity idea.
+Thanks to [Kylian Mallet](https://github.com/Kylian-Mallet) for the login tool and the browser identity idea.
 
 ## 4.1.1
 
